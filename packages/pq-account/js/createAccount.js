@@ -345,14 +345,23 @@ export async function deployERC4337Account(
         }
         const feeData = await provider.getFeeData();
 
-        // Ensure a minimum priority fee so OP-Stack sequencers don't drop the tx
-        const minTip = 1_000_000n;                       // 0.001 gwei floor
-        const maxPriority = (feeData.maxPriorityFeePerGas && feeData.maxPriorityFeePerGas > minTip)
-            ? feeData.maxPriorityFeePerGas
-            : minTip;
-        const maxFee = feeData.maxFeePerGas
-            ? (feeData.maxFeePerGas > maxPriority ? feeData.maxFeePerGas * 2n : maxPriority * 2n)
-            : maxPriority * 2n;
+        let maxFee, maxPriority;
+
+        if (network.chainId === 84532n || network.chainId === 8453n) {
+            // Base Sepolia / Base Mainnet
+            maxPriority = 0n;
+            maxFee = feeData.maxFeePerGas ?? 1_000_000n;
+        } else {
+            // Other chains (keep your logic)
+            const minTip = 1_000_000n;
+            maxPriority = feeData.maxPriorityFeePerGas > minTip
+                ? feeData.maxPriorityFeePerGas
+                : minTip;
+
+            maxFee = feeData.maxFeePerGas
+                ? feeData.maxFeePerGas * 2n
+                : maxPriority * 2n;
+        }
 
         const gasCostWei = estimatedGas * maxFee;
         console.log("- Max fee: " + ethers.formatUnits(maxFee, "gwei") + " gwei");

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ZKNox · Hardware Post-Quantum Ethereum</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #08090c;
+            --card: #0f1117;
+            --border: #1a1d28;
+            --border-hi: #2a2f3e;
+            --text: #c8cdd8;
+            --text-dim: #4a5068;
+            --accent: #00e87b;
+            --accent-dim: rgba(0, 232, 123, .08);
+            --accent-glow: rgba(0, 232, 123, .15);
+            --blue: #3b82f6;
+            --blue-dim: rgba(59, 130, 246, .08);
+            --red: #f43f5e;
+            --radius: 10px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 48px 20px 60px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* subtle grid background */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(var(--border) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border) 1px, transparent 1px);
+            background-size: 60px 60px;
+            opacity: .25;
+            pointer-events: none;
+        }
+
+        /* top glow */
+        body::after {
+            content: '';
+            position: fixed;
+            top: -200px; left: 50%;
+            transform: translateX(-50%);
+            width: 600px; height: 400px;
+            background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .container {
+            width: 460px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Header ── */
+        .header {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+
+        .header .chip {
+            display: inline-block;
+            padding: 5px 14px;
+            border: 1px solid var(--border-hi);
+            border-radius: 100px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--accent);
+            background: var(--accent-dim);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            line-height: 1.2;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+
+        .header h1 span {
+            background: linear-gradient(135deg, var(--accent), #00b4d8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header .sub {
+            font-size: 13px;
+            color: var(--text-dim);
+            font-weight: 300;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border-hi), transparent);
+        }
+
+        /* ── Section label ── */
+        .section-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* ── Divider ── */
+        .divider {
+            border: none;
+            height: 1px;
+            background: var(--border);
+            margin: 28px 0;
+        }
+
+        /* ── Inputs ── */
+        label {
+            display: block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 14px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            margin-bottom: 16px;
+            transition: border-color .2s, box-shadow .2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
+        }
+
+        input::placeholder { color: var(--text-dim); }
+
+        /* ── Buttons ── */
+        button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: var(--radius);
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .btn-create {
+            background: var(--blue-dim);
+            color: var(--blue);
+            border: 1px solid rgba(59, 130, 246, .2);
+        }
+        .btn-create:hover { background: rgba(59, 130, 246, .15); border-color: rgba(59, 130, 246, .4); }
+
+        .btn-send {
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid rgba(0, 232, 123, .2);
+        }
+        .btn-send:hover { background: rgba(0, 232, 123, .15); border-color: rgba(0, 232, 123, .4); }
+
+        button:disabled { opacity: .3; cursor: not-allowed; }
+        button:active:not(:disabled) { transform: scale(.99); }
+
+        /* ── Status ── */
+        .status {
+            margin-top: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+            word-break: break-all;
+            min-height: 16px;
+            line-height: 1.6;
+        }
+        .status.ok   { color: var(--accent); }
+        .status.err  { color: var(--red); }
+        .status.info { color: var(--text-dim); }
+
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            margin-top: 28px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            opacity: .5;
+        }
+
+        /* ── Animations ── */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .header { animation: fadeUp .5s ease both; }
+        .card   { animation: fadeUp .5s ease .1s both; }
+        .footer { animation: fadeUp .5s ease .2s both; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="header">
+        <div class="chip">Sepolia Testnet</div>
+        <h1>Hardware <span>Post-Quantum</span><br>Ethereum</h1>
+        <p class="sub">ML-DSA-44 + ECDSA &middot; Ledger Hardware Wallet</p>
+    </div>
+
+    <div class="card">
+
+        <div class="section-label">Deploy Account</div>
+        <button class="btn-create" id="btnCreate">Create Account</button>
+        <div class="status" id="statusCreate"></div>
+
+        <hr class="divider">
+
+        <div class="section-label">Send Transaction</div>
+
+        <label>Account</label>
+        <input id="from" value="0x9E58A65Ce894fE2F1d0BC33a1d8aD7a155ffeb40">
+
+        <label>To</label>
+        <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
+
+        <label>Value (ETH)</label>
+        <input id="val" value="0.0001">
+
+        <label>Pimlico API Key</label>
+        <input id="apikey" value="" placeholder="pk_…">
+
+        <button class="btn-send" id="btnSend">Send</button>
+        <div class="status" id="statusSend"></div>
+
+    </div>
+
+    <div class="footer">&copy; ZKNox</div>
+
+</div>
+
+<script type="module">
+import { ethers } from 'ethers';
+import { to_expanded_encoded_bytes } from './utils_mldsa.js';
+import {
+    openTransport, deriveMldsaSeed, getMldsaPublicKey, getEcdsaPublicKey,
+    signHybridUserOp
+} from './hardware-signer/ledgerTransport.js';
+import { LedgerEthSigner } from './LedgerEthSigner.js';
+import * as hwMldsa from './hardware-signer/mldsaSigner.js';
+import * as hwEcdsa from './hardware-signer/ecdsaSigner.js';
+import {
+    createBaseUserOperation, estimateUserOperationGas,
+    updateUserOpWithGasEstimates, submitUserOperation, ENTRY_POINT_ADDRESS
+} from './userOperation.js';
+import deployments from './deployments/deployments.json' assert { type: 'json' };
+
+const RPC      = 'https://eth-sepolia-testnet.api.pocket.network';
+const CHAIN_ID = 11155111n;
+const BIP_PATH = "m/44'/60'/0'/0/0";
+
+const d = deployments?.default ?? deployments;
+const FACTORY = d?.sepolia?.accounts?.mldsa_k1?.address
+             ?? d?.sepolia?.mldsa_k1?.address
+             ?? d?.sepolia?.address;
+
+const $ = id => document.getElementById(id);
+function setStatus(el, msg, cls = '') { el.textContent = msg; el.className = 'status ' + cls; }
+
+const FACTORY_ABI = [
+    "function createAccount(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external returns (address)",
+    "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
+];
+
+// ── CREATE ACCOUNT ──
+
+$('btnCreate').addEventListener('click', async () => {
+    const btn = $('btnCreate');
+    const s   = $('statusCreate');
+    btn.disabled = true;
+    let transport;
+
+    try {
+        if (!FACTORY || !ethers.isAddress(FACTORY)) {
+            throw new Error('Factory not found in deployments.json (keys: ' + Object.keys(d || {}).join(', ') + ')');
+        }
+
+        setStatus(s, 'Connecting Ledger…', 'info');
+        const provider = new ethers.JsonRpcProvider(RPC);
+        transport = await openTransport();
+        const signer = new LedgerEthSigner(transport, provider);
+
+        setStatus(s, 'Reading ECDSA key…', 'info');
+        const ecdsaPub = await getEcdsaPublicKey(transport, BIP_PATH);
+        const raw = ecdsaPub.subarray(2, 66);
+        const preQuantumPubKey = ethers.getAddress('0x' + ethers.keccak256(raw).slice(-40));
+
+        setStatus(s, 'Reading ML-DSA key…', 'info');
+        await deriveMldsaSeed(transport, BIP_PATH);
+        const mldsaPub = await getMldsaPublicKey(transport);
+        const postQuantumPubKey = to_expanded_encoded_bytes(mldsaPub);
+
+        if ((await provider.getCode(FACTORY)) === '0x') throw new Error('No contract at factory address');
+        const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
+
+        const expectedAddr = await factory.getFunction('getAddress').staticCall(preQuantumPubKey, postQuantumPubKey);
+        if ((await provider.getCode(expectedAddr)) !== '0x') {
+            setStatus(s, 'Account exists: ' + expectedAddr, 'ok');
+            $('from').value = expectedAddr;
+            return;
+        }
+
+        setStatus(s, 'Confirm on Ledger…', 'info');
+        const gas = await factory.createAccount.estimateGas(preQuantumPubKey, postQuantumPubKey);
+        const feeData = await provider.getFeeData();
+        const tx = await factory.createAccount(preQuantumPubKey, postQuantumPubKey, {
+            gasLimit: gas * 120n / 100n,
+            maxFeePerGas: feeData.maxFeePerGas ?? 1_000_000n,
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? 1_000_000n,
+        });
+
+        setStatus(s, 'Mining… ' + tx.hash, 'info');
+        await tx.wait();
+
+        $('from').value = expectedAddr;
+        setStatus(s, '✓ ' + expectedAddr, 'ok');
+
+    } catch (e) {
+        setStatus(s, e.message, 'err');
+    } finally {
+        try { if (transport) await transport.close(); } catch {}
+        btn.disabled = false;
+    }
+});
+
+// ── SEND TRANSACTION ──
+
+function dummySignature() {
+    return ethers.AbiCoder.defaultAbiCoder().encode(
+        ['bytes', 'bytes'],
+        [ethers.hexlify(new Uint8Array(65).fill(0xff)), ethers.hexlify(new Uint8Array(2420).fill(0xff))]
+    );
+}
+
+async function pollReceipt(hash, bundlerUrl, timeout = 120_000) {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+        try {
+            const r = await (await fetch(bundlerUrl, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getUserOperationReceipt', params: [hash] })
+            })).json();
+            if (r.result) return r.result;
+        } catch {}
+        await new Promise(r => setTimeout(r, 3000));
+    }
+    return null;
+}
+
+$('btnSend').addEventListener('click', async () => {
+    const btn = $('btnSend');
+    const s   = $('statusSend');
+    btn.disabled = true;
+
+    try {
+        const account = $('from').value.trim();
+        const to      = $('to').value.trim();
+        const val     = ethers.parseEther($('val').value.trim());
+        const apikey  = $('apikey').value.trim();
+        if (!account || !to) throw new Error('Fill in account and to addresses');
+        if (!apikey) throw new Error('Enter a Pimlico API key');
+
+        const provider   = new ethers.JsonRpcProvider(RPC);
+        const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=${apikey}`;
+
+        setStatus(s, 'Connecting Ledger…', 'info');
+        await hwEcdsa.init();
+        hwMldsa.setTransport(hwEcdsa.getTransport());
+        await hwMldsa.init();
+
+        setStatus(s, 'Building UserOp…', 'info');
+        let userOp = await createBaseUserOperation(account, to, val, '0x', provider, bundlerUrl);
+        userOp.signature = dummySignature();
+
+        const gas = await estimateUserOperationGas(userOp, bundlerUrl);
+        userOp = updateUserOpWithGasEstimates(userOp, gas);
+
+        setStatus(s, 'Sign on Ledger…', 'info');
+        const res = await signHybridUserOp(hwEcdsa.getTransport(), BIP_PATH, userOp, ENTRY_POINT_ADDRESS, CHAIN_ID);
+        const ecdsaSig = ethers.concat([res.ecdsaR, res.ecdsaS, ethers.toBeHex(res.ecdsaV + 27, 1)]);
+        userOp.signature = ethers.AbiCoder.defaultAbiCoder().encode(['bytes', 'bytes'], [ecdsaSig, res.mldsaSignature]);
+
+        setStatus(s, 'Submitting…', 'info');
+        const hash = await submitUserOperation(userOp, bundlerUrl, ENTRY_POINT_ADDRESS);
+
+        setStatus(s, 'Waiting for receipt…', 'info');
+        const receipt = await pollReceipt(hash, bundlerUrl);
+        setStatus(s, receipt?.receipt?.transactionHash
+            ? '✓ ' + receipt.receipt.transactionHash
+            : 'Submitted: ' + hash, 'ok');
+
+    } catch (e) {
+        setStatus(s, e.message, 'err');
+    } finally {
+        try { await hwMldsa.cleanup(); await hwEcdsa.cleanup(); } catch {}
+        btn.disabled = false;
+    }
+});
+</script>
+</body>
+</html>
