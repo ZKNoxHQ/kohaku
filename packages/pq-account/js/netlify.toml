@@ -3,7 +3,7 @@
   publish = "dist"
   
 [[headers]]
-  for = "/*.apdu"
+  for = "/*.txt"
   [headers.values]
     Content-Type = "text/plain"
 
