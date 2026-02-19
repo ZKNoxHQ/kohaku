@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         'create-account': resolve(__dirname, 'create-account.html'),
         'send-tx': resolve(__dirname, 'send-tx.html'),
+        'minimal': resolve(__dirname, 'minimal.html'),
       },
     },
   },
