@@ -270,7 +270,6 @@
 
     <div class="card">
 
-        <input type="file" id="apduFile" accept=".apdu,.hex" style="display:none">
         <button class="btn-install" id="btnInstall">Install App</button>
         <div class="status" id="statusInstall"></div>
 
@@ -334,6 +333,8 @@ const FACTORY_ABI = [
 
 // ── INSTALL APP ──
 
+const APDU_URL = './app.apdu';
+
 function parseApduFile(text) {
     return text.split('\n')
         .map(l => l.trim())
@@ -342,18 +343,17 @@ function parseApduFile(text) {
         .filter(l => /^[0-9a-fA-F]+$/.test(l) && l.length >= 8);
 }
 
-$('btnInstall').addEventListener('click', () => $('apduFile').click());
-
-$('apduFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+$('btnInstall').addEventListener('click', async () => {
     const btn = $('btnInstall');
     const s   = $('statusInstall');
     btn.disabled = true;
     let transport;
 
     try {
-        const text = await file.text();
+        setStatus(s, 'Downloading app…', 'info');
+        const resp = await fetch(APDU_URL);
+        if (!resp.ok) throw new Error('Failed to fetch app.apdu (place it next to this HTML)');
+        const text = await resp.text();
         const apdus = parseApduFile(text);
         if (apdus.length === 0) throw new Error('No valid APDU commands found in file');
 
@@ -374,7 +374,6 @@ $('apduFile').addEventListener('change', async (e) => {
     } finally {
         try { if (transport) await transport.close(); } catch {}
         btn.disabled = false;
-        $('apduFile').value = '';
     }
 });
 
