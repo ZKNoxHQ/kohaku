@@ -1,6 +1,11 @@
 [build]
   command = "npm install && npm run build"
   publish = "dist"
+  
+[[redirects]]
+  from = "/minimal.html"
+  to = "/minimal.html"
+  status = 200
 
 [[redirects]]
   from = "/*"
