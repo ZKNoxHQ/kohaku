@@ -336,9 +336,9 @@ const FACTORY_ABI = [
 const APDU_URL = './app.apdu';
 
 function parseApduFile(text) {
-    return text.split('\n')
+    return text.replace(/\r/g, '').split('\n')
         .map(l => l.trim())
-        .filter(l => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'))
+        .filter(l => l.length > 0 && !l.startsWith('#') && !l.startsWith('//') && !l.startsWith('<'))
         .map(l => l.replace(/^=>?\s*/, ''))
         .filter(l => /^[0-9a-fA-F]+$/.test(l) && l.length >= 8);
 }
@@ -352,10 +352,18 @@ $('btnInstall').addEventListener('click', async () => {
     try {
         setStatus(s, 'Downloading app…', 'info');
         const resp = await fetch(APDU_URL);
-        if (!resp.ok) throw new Error('Failed to fetch app.apdu (place it next to this HTML)');
+        if (!resp.ok) throw new Error(`Failed to fetch app.apdu (HTTP ${resp.status})`);
         const text = await resp.text();
+
+        if (text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
+            throw new Error('app.apdu not found (got HTML — check the file is deployed on Netlify)');
+        }
+
         const apdus = parseApduFile(text);
-        if (apdus.length === 0) throw new Error('No valid APDU commands found in file');
+        if (apdus.length === 0) {
+            const preview = text.substring(0, 120);
+            throw new Error('No valid APDU commands found. File starts with: ' + preview);
+        }
 
         setStatus(s, `Parsed ${apdus.length} APDUs. Connecting Ledger…`, 'info');
         transport = await openTransport();
