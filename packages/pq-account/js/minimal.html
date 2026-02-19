@@ -200,6 +200,13 @@
             transition: all .2s;
         }
 
+        .btn-install {
+            background: rgba(245, 158, 11, .08);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, .2);
+        }
+        .btn-install:hover { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .4); }
+
         .btn-create {
             background: var(--blue-dim);
             color: var(--blue);
@@ -263,14 +270,19 @@
 
     <div class="card">
 
+        <input type="file" id="apduFile" accept=".apdu,.hex" style="display:none">
+        <button class="btn-install" id="btnInstall">Install App</button>
+        <div class="status" id="statusInstall"></div>
 
-        <button class="btn-create" id="btnCreate">Get Account</button>
+        <hr class="divider">
+
+        <button class="btn-create" id="btnCreate" disabled>Get Account</button>
         <div class="status" id="statusCreate"></div>
 
         <hr class="divider">
 
         <label>Account</label>
-        <input id="from" value="" placeholder="Click on [GET ACCOUNT]" readonly>
+        <input id="from" value="" placeholder="Install app then Get Account" readonly>
 
         <label>To</label>
         <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
@@ -319,6 +331,52 @@ const FACTORY_ABI = [
     "function createAccount(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external returns (address)",
     "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
 ];
+
+// ── INSTALL APP ──
+
+function parseApduFile(text) {
+    return text.split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'))
+        .map(l => l.replace(/^=>?\s*/, ''))
+        .filter(l => /^[0-9a-fA-F]+$/.test(l) && l.length >= 8);
+}
+
+$('btnInstall').addEventListener('click', () => $('apduFile').click());
+
+$('apduFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const btn = $('btnInstall');
+    const s   = $('statusInstall');
+    btn.disabled = true;
+    let transport;
+
+    try {
+        const text = await file.text();
+        const apdus = parseApduFile(text);
+        if (apdus.length === 0) throw new Error('No valid APDU commands found in file');
+
+        setStatus(s, `Parsed ${apdus.length} APDUs. Connecting Ledger…`, 'info');
+        transport = await openTransport();
+
+        for (let i = 0; i < apdus.length; i++) {
+            setStatus(s, `Sending APDU ${i + 1}/${apdus.length}…`, 'info');
+            const cmd = Uint8Array.from(apdus[i].match(/.{2}/g).map(b => parseInt(b, 16)));
+            await transport.exchange(cmd);
+        }
+
+        setStatus(s, '✓ App installed', 'ok');
+        $('btnCreate').disabled = false;
+
+    } catch (e) {
+        setStatus(s, e.message, 'err');
+    } finally {
+        try { if (transport) await transport.close(); } catch {}
+        btn.disabled = false;
+        $('apduFile').value = '';
+    }
+});
 
 // ── CREATE ACCOUNT ──
 
