@@ -263,16 +263,14 @@
 
     <div class="card">
 
-        <div class="section-label">Deploy Account</div>
-        <button class="btn-create" id="btnCreate">Create Account</button>
+
+        <button class="btn-create" id="btnCreate">Get Account</button>
         <div class="status" id="statusCreate"></div>
 
         <hr class="divider">
 
-        <div class="section-label">Send Transaction</div>
-
         <label>Account</label>
-        <input id="from" value="0x9E58A65Ce894fE2F1d0BC33a1d8aD7a155ffeb40">
+        <input id="from" value="" placeholder="Click on [GET ACCOUNT]" readonly>
 
         <label>To</label>
         <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
@@ -280,15 +278,12 @@
         <label>Value (ETH)</label>
         <input id="val" value="0.0001">
 
-        <label>Pimlico API Key</label>
-        <input id="apikey" value="" placeholder="pk_…">
-
-        <button class="btn-send" id="btnSend">Send</button>
+        <button class="btn-send" id="btnSend" disabled>Send</button>
         <div class="status" id="statusSend"></div>
 
     </div>
 
-    <div class="footer">&copy; ZKNox</div>
+    <div class="footer">ZKNOX &copy;</div>
 
 </div>
 
@@ -360,6 +355,7 @@ $('btnCreate').addEventListener('click', async () => {
         if ((await provider.getCode(expectedAddr)) !== '0x') {
             setStatus(s, 'Account exists: ' + expectedAddr, 'ok');
             $('from').value = expectedAddr;
+            $('btnSend').disabled = false;
             return;
         }
 
@@ -376,6 +372,7 @@ $('btnCreate').addEventListener('click', async () => {
         await tx.wait();
 
         $('from').value = expectedAddr;
+        $('btnSend').disabled = false;
         setStatus(s, '✓ ' + expectedAddr, 'ok');
 
     } catch (e) {
@@ -419,12 +416,10 @@ $('btnSend').addEventListener('click', async () => {
         const account = $('from').value.trim();
         const to      = $('to').value.trim();
         const val     = ethers.parseEther($('val').value.trim());
-        const apikey  = $('apikey').value.trim();
         if (!account || !to) throw new Error('Fill in account and to addresses');
-        if (!apikey) throw new Error('Enter a Pimlico API key');
 
         const provider   = new ethers.JsonRpcProvider(RPC);
-        const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=${apikey}`;
+        const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=pim_i3rJWDhHAhvqmPgaA3DsUo`;
 
         setStatus(s, 'Connecting Ledger…', 'info');
         await hwEcdsa.init();
