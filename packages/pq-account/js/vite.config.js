@@ -1,9 +1,9 @@
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
-export default { publicDir: 'public' }
 
 export default defineConfig({
+  publicDir: 'public',
   plugins: [nodePolyfills()],
   build: {
     target: 'esnext',
