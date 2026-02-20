@@ -10,7 +10,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
-      external: ['/vendor/ledgerjs_bundle.js'],
+      external: ['/public/vendor/ledgerjs_bundle.js'],
       input: {
         'create-account': resolve(__dirname, 'create-account.html'),
         'send-tx': resolve(__dirname, 'send-tx.html'),

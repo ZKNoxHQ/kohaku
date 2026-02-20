@@ -199,6 +199,9 @@
             transition: all .2s;
         }
         .btn-install {
+            display: block;
+            text-decoration: none;
+            text-align: center;
             background: var(--orange-dim);
             color: var(--orange);
             border: 1px solid rgba(245, 158, 11, .2);
@@ -266,7 +269,12 @@
 
     <div class="card">
 
-        <button class="btn-install" id="btnInstall">Install App</button>
+        <iframe
+            src="http://localhost:3001/sideloader.html?embed=true"
+            style="width:100%; height:52px; border:none; display:block; overflow:hidden;"
+            scrolling="no"
+            allow="hid"
+        ></iframe>
         <div class="status" id="statusInstall"></div>
 
         <hr class="divider">
@@ -309,12 +317,11 @@ import {
     updateUserOpWithGasEstimates, submitUserOperation, ENTRY_POINT_ADDRESS
 } from './userOperation.js';
 import deployments from './deployments/deployments.json' assert { type: 'json' };
-const { TransportWebHID, loadApp, IntelHexParser } = await import(/* @vite-ignore */ '/vendor/ledgerjs_bundle.js');
+const { TransportWebHID } = await import(/* @vite-ignore */ '/public/vendor/ledgerjs_bundle.js');
 
 const RPC      = 'https://eth-sepolia-testnet.api.pocket.network';
 const CHAIN_ID = 11155111n;
 const BIP_PATH = "m/44'/60'/0'/0/0";
-const APP_DIR  = './apps/mldsa';
 
 const d = deployments?.default ?? deployments;
 const FACTORY = d?.sepolia?.accounts?.mldsa_k1?.address
@@ -328,116 +335,6 @@ const FACTORY_ABI = [
     "function createAccount(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external returns (address)",
     "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
 ];
-
-// ─────────────────────────────────────────────
-// Install
-// ─────────────────────────────────────────────
-
-let installTransport = null;
-
-const sInstall  = document.getElementById('statusInstall');
-const sCreate   = document.getElementById('statusCreate');
-
-function parseMakefile(content) {
-    const result = {};
-    for (const line of content.split('\n')) {
-        const m = line.match(/^\s*(APPNAME|APPVERSION_M|APPVERSION_N|APPVERSION_P|CURVE_APP_LOAD_PARAMS|PATH_APP_LOAD_PARAMS)\s*[:?]?=\s*(.+)/);
-        if (m) {
-            const key = m[1].trim();
-            let val = m[2].trim().replace(/#.*$/, '').trim();
-            if (val.includes('$(')) continue;
-            if (!(key in result)) result[key] = val;
-        }
-    }
-    if (result.APPVERSION_M && result.APPVERSION_N && result.APPVERSION_P)
-        result.APPVERSION = `${result.APPVERSION_M}.${result.APPVERSION_N}.${result.APPVERSION_P}`;
-    return result;
-}
-
-function parseMapFile(content) {
-    const symbols = {};
-    for (const line of content.split('\n')) {
-        const match = line.match(/^([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+.*\s+(_\w+)\s*=\s*\./);
-        if (match) symbols[match[2]] = parseInt(match[1], 16);
-    }
-    return symbols;
-}
-
-// ── INSTALL ──
-document.getElementById('btnInstall').addEventListener('click', async () => {
-    document.getElementById('btnInstall').disabled = true;
-
-    try {
-        if (!installTransport) {
-            setStatus(sInstall, 'Connecting…', 'info');
-            installTransport = await TransportWebHID.request(true);
-        }
-
-        let apiLevel = 25;
-        const manifestResp = await fetch(`${APP_DIR}/manifest.json`);
-        if (manifestResp.ok) {
-            const manifest = await manifestResp.json();
-            apiLevel = manifest.api_level ?? apiLevel;
-        }
-
-        let appName = 'MLDSA', appVersion = '1.0.0', curves = null, paths = null;
-        const mkResp = await fetch(`${APP_DIR}/Makefile`);
-        if (mkResp.ok) {
-            const mk = parseMakefile(await mkResp.text());
-            if (mk.APPNAME)    appName    = mk.APPNAME.replace(/^"(.*)"$/, '$1');
-            if (mk.APPVERSION) appVersion = mk.APPVERSION;
-            if (mk.CURVE_APP_LOAD_PARAMS)
-                curves = mk.CURVE_APP_LOAD_PARAMS.split(/\s+/).filter(Boolean);
-            if (mk.PATH_APP_LOAD_PARAMS) {
-                const quoted = mk.PATH_APP_LOAD_PARAMS.match(/"([^"]+)"/g);
-                paths = quoted ? quoted.map(p => p.replace(/"/g, '')) : [mk.PATH_APP_LOAD_PARAMS.trim()];
-            }
-        }
-
-        let dataSize = 0, installParamsSize = 0;
-        const mapResp = await fetch(`${APP_DIR}/app.map`);
-        if (mapResp.ok) {
-            const sym = parseMapFile(await mapResp.text());
-            if (sym._envram_data !== undefined && sym._nvram_data !== undefined)
-                dataSize = sym._envram_data - sym._nvram_data;
-            if (sym._einstall_parameters !== undefined && sym._install_parameters !== undefined)
-                installParamsSize = sym._einstall_parameters - sym._install_parameters;
-        }
-
-        const hexResp = await fetch(`${APP_DIR}/app.hex`);
-        if (!hexResp.ok) throw new Error(`app.hex not found (HTTP ${hexResp.status})`);
-        const hexText = await hexResp.text();
-
-        setStatus(sInstall, 'Approve on Ledger…', 'info');
-
-        const hash = await loadApp(installTransport, {
-            targetId:          0x33100004,
-            targetVersion:     '',
-            fileName:          hexText,
-            appName,
-            appVersion,
-            curves,
-            paths,
-            icon:              null,
-            dataSize:          dataSize > 0 ? dataSize : null,
-            installParamsSize: installParamsSize > 0 ? installParamsSize : null,
-            appFlags:          0,
-            apiLevel,
-            delete:            true,
-            debug:             true,
-        });
-
-        setStatus(sInstall, '✓ Installed — ' + hash.slice(0, 16) + '…', 'ok');
-        setStatus(sCreate, 'Open the app on your Ledger', 'info');
-
-    } catch (e) {
-        setStatus(sInstall, e.message, 'err');
-        console.error(e);
-    } finally {
-        try { if (installTransport) { await installTransport.close(); installTransport = null; } } catch {}
-        document.getElementById('btnInstall').disabled = false;
-    }
-});
 
 // ─────────────────────────────────────────────
 // Get Account (unchanged from original)
