@@ -1,328 +1,290 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ZKNox · Hardware Post-Quantum Ethereum</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZKNOX | PQ Ethereum Account</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #08090c;
-            --card: #0f1117;
-            --border: #1a1d28;
-            --border-hi: #2a2f3e;
-            --text: #c8cdd8;
-            --text-dim: #4a5068;
-            --accent: #00e87b;
-            --accent-dim: rgba(0, 232, 123, .08);
-            --accent-glow: rgba(0, 232, 123, .15);
-            --blue: #3b82f6;
-            --blue-dim: rgba(59, 130, 246, .08);
-            --red: #f43f5e;
-            --orange: #f59e0b;
-            --orange-dim: rgba(245, 158, 11, .08);
-            --radius: 10px;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-tertiary: #f0f2f5;
+            --accent-primary: #7c3aed;
+            --accent-secondary: #a78bfa;
+            --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+            --text-primary: #1a1a2e;
+            --text-secondary: #4a5568;
+            --text-muted: #718096;
+            --border-color: #e2e8f0;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+            --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+            --shadow-lg: 0 10px 40px rgba(0,0,0,.1);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
         }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
         body {
-            font-family: 'Outfit', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            padding: 48px 16px 60px;
-            position: relative;
-            overflow-x: hidden;
-        }
-
-        body::before {
-            content: '';
-            position: fixed; inset: 0;
-            background-image:
-                linear-gradient(var(--border) 1px, transparent 1px),
-                linear-gradient(90deg, var(--border) 1px, transparent 1px);
-            background-size: 60px 60px;
-            opacity: .25;
-            pointer-events: none;
-        }
-
-        body::after {
-            content: '';
-            position: fixed;
-            top: -200px; left: 50%;
-            transform: translateX(-50%);
-            width: 600px; height: 400px;
-            background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
-            pointer-events: none;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 460px;
-            position: relative;
-            z-index: 1;
-        }
-
-        /* ── Header ── */
-        .header {
-            text-align: center;
-            margin-bottom: 36px;
-        }
-        .header .chip {
-            display: inline-block;
-            padding: 5px 14px;
-            border: 1px solid var(--border-hi);
-            border-radius: 100px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: var(--accent);
-            background: var(--accent-dim);
-            margin-bottom: 20px;
-        }
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            line-height: 1.2;
-            color: #fff;
-            margin-bottom: 8px;
-        }
-        .header h1 span {
-            background: linear-gradient(135deg, var(--accent), #00b4d8);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .header .sub {
-            font-size: 13px;
-            color: var(--text-dim);
-            font-weight: 300;
-        }
-
-        /* ── Card ── */
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 28px 24px;
-            position: relative;
-            overflow: hidden;
-            margin-bottom: 16px;
-        }
-        @media (max-width: 480px) {
-            .card { padding: 24px 16px; border-radius: 12px; }
-            .header h1 { font-size: 22px; }
-            body { padding-top: 32px; }
-        }
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(--border-hi), transparent);
-        }
-
-        /* ── Section label ── */
-        .section-label {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: var(--text-dim);
-            margin-bottom: 18px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .section-label::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-        }
-
-        /* ── Divider ── */
-        .divider {
-            border: none;
-            height: 1px;
-            background: var(--border);
-            margin: 28px 0;
-        }
-
-        /* ── Inputs ── */
-        label {
-            display: block;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-            color: var(--text-dim);
-            margin-bottom: 6px;
-        }
-        input {
-            width: 100%;
-            padding: 12px 14px;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            color: var(--text);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            margin-bottom: 16px;
-            transition: border-color .2s, box-shadow .2s;
-        }
-        input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-dim);
-        }
-        input::placeholder { color: var(--text-dim); }
-
-        /* ── Buttons ── */
-        button {
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: var(--radius);
-            font-family: 'Outfit', sans-serif;
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: all .2s;
-        }
-        .btn-install {
-            display: block;
-            text-decoration: none;
-            text-align: center;
-            background: var(--orange-dim);
-            color: var(--orange);
-            border: 1px solid rgba(245, 158, 11, .2);
-        }
-        .btn-install:hover:not(:disabled) { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .4); }
-        .btn-create {
-            background: var(--blue-dim);
-            color: var(--blue);
-            border: 1px solid rgba(59, 130, 246, .2);
-        }
-        .btn-create:hover:not(:disabled) { background: rgba(59, 130, 246, .15); border-color: rgba(59, 130, 246, .4); }
-        .btn-send {
-            background: var(--accent-dim);
-            color: var(--accent);
-            border: 1px solid rgba(0, 232, 123, .2);
-        }
-        .btn-send:hover:not(:disabled) { background: rgba(0, 232, 123, .15); border-color: rgba(0, 232, 123, .4); }
-
-        button:disabled { opacity: .3; cursor: not-allowed; }
-        button:active:not(:disabled) { transform: scale(.99); }
-
-        /* ── Status ── */
-        .status {
-            margin-top: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            color: var(--text-dim);
-            word-break: break-all;
-            min-height: 16px;
+            font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             line-height: 1.6;
-        }
-        .status.ok   { color: var(--accent); }
-        .status.err  { color: var(--red); }
-        .status.info { color: var(--text-dim); }
-
-        /* ── Balance ── */
-        .balance-row {
-            margin-top: 0;
-            margin-bottom: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-        }
-        #balanceCreateRow {
-            margin-top: 12px;
-            margin-bottom: 0;
-        }
-        .balance-info {
-            color: var(--text-dim);
-        }
-        .balance-fund {
-            color: var(--orange);
+            font-size: 16px;
         }
 
-        /* ── Footer ── */
-        .footer {
-            text-align: center;
-            margin-top: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            letter-spacing: 1px;
-            color: var(--text-dim);
-            opacity: .5;
+        /* Navigation */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0;
+            z-index: 1000;
+            background: #0a0a0f;
+            border-bottom: 1px solid rgba(255,255,255,.1);
         }
+        .nav-container {
+            max-width: 1140px; margin: 0 auto; padding: 0 2rem;
+            height: 70px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .logo { display: flex; align-items: center; text-decoration: none; }
+        .logo img { height: 48px; width: auto; }
+        .nav-links { display: flex; align-items: center; gap: 0.25rem; }
+        .nav-link { color: #a78bfa; text-decoration: none; padding: 0.5rem 1rem; font-size: 0.95rem; font-weight: 500; border-radius: var(--radius-sm); transition: all 0.2s; }
+        .nav-link:hover { color: #c4b5fd; background: rgba(167,139,250,.1); }
+        .nav-dropdown { position: relative; }
+        .nav-dropdown > .nav-link { display: flex; align-items: center; gap: 0.35rem; }
+        .nav-dropdown > .nav-link::after { content: ''; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid currentColor; transition: transform 0.2s; }
+        .nav-dropdown:hover > .nav-link::after { transform: rotate(180deg); }
+        .dropdown-menu { position: absolute; top: 100%; left: 0; min-width: 200px; background: #1a1a25; border: 1px solid rgba(255,255,255,.1); border-radius: var(--radius-md); padding: 0.5rem; opacity: 0; visibility: hidden; transform: translateY(10px); transition: all 0.2s; box-shadow: 0 10px 40px rgba(0,0,0,.3); z-index: 1001; }
+        .nav-dropdown:hover .dropdown-menu { opacity: 1; visibility: visible; transform: translateY(5px); }
+        .dropdown-item { display: block; padding: 0.65rem 1rem; color: #9ca3af; text-decoration: none; font-size: 0.9rem; border-radius: var(--radius-sm); transition: all 0.2s; }
+        .dropdown-item:hover { color: #a78bfa; background: rgba(167,139,250,.1); }
+        .nav-icon { display: flex; align-items: center; justify-content: center; width: 36px; padding: 0; }
+        .nav-icon svg { width: 18px; height: 18px; }
+        .github-btn { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: var(--radius-md); color: #fff; text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: all 0.2s; }
+        .github-btn:hover { background: rgba(255,255,255,.1); border-color: #a78bfa; }
+        .github-btn svg { width: 18px; height: 18px; }
+        .mobile-menu-btn { display: none; flex-direction: column; gap: 5px; padding: 0.5rem; background: none; border: none; cursor: pointer; }
+        .mobile-menu-btn span { width: 22px; height: 2px; background: #fff; transition: all 0.3s; }
 
-        /* ── Animations ── */
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(12px); }
-            to   { opacity: 1; transform: translateY(0); }
+        /* Hero */
+        .hero { padding: 110px 2rem 40px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); }
+        .hero-container { max-width: 1140px; margin: 0 auto; display: flex; align-items: center; gap: 3rem; }
+        .hero-image { flex: 0 0 220px; }
+        .hero-image img { width: 100%; height: auto; border-radius: var(--radius-lg); }
+        .hero-content { flex: 1; }
+        .hero h1 { font-size: 2.5rem; font-weight: 700; line-height: 1.2; margin-bottom: 1rem; color: var(--text-primary); }
+        .hero h1 span { background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .hero-lead { font-size: 1.1rem; color: var(--text-secondary); line-height: 1.7; }
+        .hero-chip { display: inline-block; padding: 4px 14px; border: 1px solid var(--border-color); border-radius: 100px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-primary); background: rgba(124,58,237,.06); margin-bottom: 16px; }
+
+        /* Layout */
+        .container { max-width: 1140px; margin: 0 auto; padding: 0 2rem; }
+        main { padding: 2rem 0 4rem; }
+
+        /* Centered form wrapper */
+        .form-wrap { max-width: 540px; margin: 0 auto; }
+
+        /* Section Cards */
+        .section { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.5rem; transition: all 0.3s; }
+        .section:hover { box-shadow: var(--shadow-md); }
+        .section h2 { font-size: 1.1rem; font-weight: 600; color: var(--accent-primary); margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid rgba(124,58,237,.2); }
+        .section p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem; }
+
+        /* Divider */
+        .divider { border: none; height: 1px; background: var(--border-color); margin: 1.5rem 0; }
+
+        /* Form Elements */
+        label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; color: var(--text-secondary); font-size: 0.85rem; }
+        input { width: 100%; padding: 0.7rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary); font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; transition: all 0.2s; margin-bottom: 0; }
+        input:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(124,58,237,.1); }
+        input::placeholder { color: var(--text-muted); }
+        input[readonly] { background: var(--bg-tertiary); color: var(--text-muted); cursor: default; }
+        input[type="number"] { -moz-appearance: textfield; }
+
+        /* Buttons */
+        button { background: var(--accent-primary); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: var(--radius-md); cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: all 0.2s; font-family: inherit; width: 100%; }
+        button:hover:not(:disabled) { background: #6d28d9; transform: translateY(-1px); box-shadow: var(--shadow-md); }
+        button:active:not(:disabled) { transform: translateY(0); }
+        button:disabled { background: var(--bg-tertiary); color: var(--text-muted); cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-install { background: rgba(245,158,11,.1); color: var(--warning); border: 1px solid rgba(245,158,11,.3); }
+        .btn-install:hover:not(:disabled) { background: rgba(245,158,11,.2); }
+        .btn-create { background: rgba(124,58,237,.1); color: var(--accent-primary); border: 1px solid rgba(124,58,237,.3); }
+        .btn-create:hover:not(:disabled) { background: rgba(124,58,237,.2); }
+        .btn-send { background: rgba(16,185,129,.1); color: var(--success); border: 1px solid rgba(16,185,129,.3); }
+        .btn-send:hover:not(:disabled) { background: rgba(16,185,129,.2); }
+
+        /* Status */
+        .status { margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--text-muted); word-break: break-all; min-height: 16px; line-height: 1.6; }
+        .status.ok   { color: var(--success); }
+        .status.err  { color: var(--danger); }
+        .status.info { color: var(--text-muted); }
+
+        /* Balance */
+        .balance-row { margin-top: 0; margin-bottom: 0.75rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; }
+        #balanceCreateRow { margin-top: 0.75rem; margin-bottom: 0; }
+        .balance-info { color: var(--text-muted); }
+        .balance-fund { color: var(--warning); }
+
+        /* Footer */
+        footer { background: #0a0a0f; padding: 2rem; text-align: center; border-top: 1px solid rgba(167,139,250,.2); }
+        .footer-copy { color: #a78bfa; font-size: 0.9rem; }
+        .footer-copy a { color: #fff; text-decoration: none; font-weight: 600; }
+        .footer-copy a:hover { color: #c4b5fd; }
+
+        /* Derpath row */
+        .derpath-row { display: flex; align-items: center; gap: 6px; margin-bottom: 1rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--text-muted); }
+        .derpath-row input { width: 64px; margin: 0; padding: 4px 8px; font-size: 0.8rem; }
+
+        @media (max-width: 768px) {
+            .hero-container { flex-direction: column; text-align: center; }
+            .hero-image { flex: 0 0 auto; max-width: 180px; }
+            .hero h1 { font-size: 1.75rem; }
+            .nav-links { display: none; position: absolute; top: 70px; left: 0; right: 0; background: #0a0a0f; flex-direction: column; padding: 1rem; border-bottom: 1px solid rgba(255,255,255,.1); }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; padding: 0.75rem 1rem; }
+            .dropdown-menu { position: static; opacity: 1; visibility: visible; transform: none; background: transparent; border: none; box-shadow: none; padding-left: 1rem; }
+            .mobile-menu-btn { display: flex; }
+            .github-btn { display: none; }
         }
-        .header { animation: fadeUp .5s ease both; }
-        .card   { animation: fadeUp .5s ease .1s both; }
-        .footer { animation: fadeUp .5s ease .2s both; }
     </style>
 </head>
 <body>
-<div class="container">
 
-    <div class="header">
-        <div class="chip">Sepolia Testnet</div>
-        <h1>Hardware <span>Post-Quantum</span><br>Ethereum</h1>
-        <p class="sub">ML-DSA-44 + ECDSA &middot; Ledger Hardware Wallet</p>
-    </div>
-
-    <div class="card">
-
-        <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 4px;">
-            Install MLDSA App from <a href="https://zknox.com/zknox-orange/sideloader" target="_blank" rel="noopener" style="color: var(--orange); text-decoration: underline; text-underline-offset: 3px;">ZKNOX Orange</a>
-        </p>
-        <div class="status" id="statusInstall"></div>
-
-        <hr class="divider">
-
-        <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim);">
-            <span>DERIVATION PATH: m/44'/60'/0'/0/</span>
-            <input id="bipIndex" type="number" min="0" value="0" style="width:48px; margin:0; padding:4px 6px; text-align:center; font-size:11px;">
+    <!-- Navigation -->
+    <nav>
+        <div class="nav-container">
+            <a href="https://zknox.com" class="logo"><img src="zknox-logo.png" alt="ZKNOX"></a>
+            <div class="nav-links">
+                <a href="https://zknox.com" class="nav-link">Home</a>
+                <div class="nav-dropdown">
+                    <a href="https://zknox.com/technologies.html" class="nav-link">Technologies</a>
+                    <div class="dropdown-menu">
+                        <a href="https://zknox.com/tech-ecc.html" class="dropdown-item">Elliptic Curves</a>
+                        <a href="https://zknox.com/tech-hw.html" class="dropdown-item">Hardware Wallets</a>
+                        <a href="https://zknox.com/tech-mpc.html" class="dropdown-item">MPC</a>
+                        <a href="https://zknox.com/tech-pqc.html" class="dropdown-item">Post-Quantum Cryptography</a>
+                        <a href="https://zknox.com/tech-zk.html" class="dropdown-item">Zero Knowledge</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="https://zknox.com/products.html" class="nav-link">Products</a>
+                    <div class="dropdown-menu">
+                        <a href="https://zknox.com/products.html#libraries" class="dropdown-item">Cryptographic Libraries</a>
+                        <a href="https://zknox.com/products.html#hardware" class="dropdown-item">Hardware Integration</a>
+                        <a href="https://zknox.com/products.html#contracts" class="dropdown-item">Smart Contracts</a>
+                        <a href="https://zknox.com/products.html#zk" class="dropdown-item">ZK Circuits</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="tools.html" class="nav-link">Tools</a>
+                    <div class="dropdown-menu">
+                        <a href="official-apps.html" class="dropdown-item">ZKNOX Blue</a>
+                        <a href="sideloader.html" class="dropdown-item">ZKNOX Orange</a>
+                        <a href="https://zknox.com/demo-pqbip39.html" class="dropdown-item">PQBIP39</a>
+                        <a href="https://zknox.com/demo-zk-hardware.html" class="dropdown-item">ZK-Hardware</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="https://zknox.com/research.html" class="nav-link">Research</a>
+                    <div class="dropdown-menu">
+                        <a href="https://zknox.com/blog.html" class="dropdown-item">Blog</a>
+                        <a href="https://zknox.com/eips.html" class="dropdown-item">EIPs</a>
+                        <a href="https://zknox.com/hackathons.html" class="dropdown-item">Hackathons</a>
+                        <a href="https://zknox.com/papers.html" class="dropdown-item">Papers</a>
+                        <a href="https://zknox.com/talks.html" class="dropdown-item">Talks</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="https://zknox.com/services.html" class="nav-link">Services</a>
+                    <div class="dropdown-menu">
+                        <a href="https://zknox.com/services.html#audits" class="dropdown-item">Audits</a>
+                        <a href="https://zknox.com/services.html#design" class="dropdown-item">Design</a>
+                        <a href="https://zknox.com/services.html#hardware" class="dropdown-item">Hardware Integration</a>
+                        <a href="https://zknox.com/services.html#implementation" class="dropdown-item">Implementation</a>
+                    </div>
+                </div>
+                <a href="https://zknox.com/team.html" class="nav-link">Team</a>
+                <a href="https://x.com/zknoxHQ" class="nav-link nav-icon" target="_blank" title="X/Twitter">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                </a>
+            </div>
+            <a href="https://github.com/ZKNoxHQ" class="github-btn" target="_blank">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                GitHub
+            </a>
+            <button class="mobile-menu-btn" onclick="toggleMenu()"><span></span><span></span><span></span></button>
         </div>
+    </nav>
 
-        <button class="btn-create" id="btnCreate">Get Account</button>
-        <div class="balance-row" id="balanceCreateRow" style="display:none"></div>
-        <div class="status" id="statusCreate"></div>
+    <!-- Hero -->
+    <header class="hero">
+        <div class="hero-container">
+            <div class="hero-image">
+                <img src="pq-account.png" alt="Hardware Post-Quantum Account">
+            </div>
+            <div class="hero-content">
+                <h1>Hardware <span>Post-Quantum</span> Account</h1>
+                <p class="hero-lead">Sepolia testnet &middot; ML-DSA-44 + ECDSA &middot; Ledger wallet</p>
+            </div>
+        </div>
+    </header>
 
-        <hr class="divider">
+    <main>
+        <div class="container">
+            <div class="form-wrap">
 
-        <label>PQ Account</label>
-        <input id="from" value="" placeholder="Get Account first" readonly>
-        <div class="balance-row" id="balance4337Row" style="display:none"></div>
+                <div class="section">
+                    <h2>1. Install MLDSA App</h2>
+                    <p>Install MLDSA App from <a href="https://zknox.com/zknox-orange/sideloader" target="_blank" rel="noopener" style="color: var(--warning); text-decoration: underline; text-underline-offset: 3px;">ZKNOX Orange</a></p>
+                    <div class="status" id="statusInstall"></div>
+                </div>
 
-        <label>To</label>
-        <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
+                <div class="section">
+                    <h2>2. Get Account</h2>
 
-        <label>Value (ETH)</label>
-        <input id="val" value="0.0001">
+                    <div class="derpath-row">
+                        <span>DERIVATION PATH: m/44'/60'/0'/0/</span>
+                        <input id="bipIndex" type="number" min="0" value="0">
+                    </div>
 
-        <button class="btn-send" id="btnSend" disabled>Send</button>
-        <div class="status" id="statusSend"></div>
+                    <button class="btn-create" id="btnCreate">Get Account</button>
+                    <div class="balance-row" id="balanceCreateRow" style="display:none"></div>
+                    <div class="status" id="statusCreate"></div>
 
-    </div>
+                    <hr class="divider">
 
-    <div class="footer">ZKNOX &copy;</div>
+                    <label>PQ Account</label>
+                    <input id="from" value="" placeholder="Get Account first" readonly>
+                    <div class="balance-row" id="balance4337Row" style="display:none"></div>
 
-</div>
+                    <label>To</label>
+                    <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
+
+                    <label>Value (ETH)</label>
+                    <input id="val" value="0.0001" style="margin-bottom: 1rem;">
+
+                    <button class="btn-send" id="btnSend" disabled>Send</button>
+                    <div class="status" id="statusSend"></div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p class="footer-copy">Copyright &copy; 2025 <a href="https://zknox.com">ZKNOX</a>. All rights reserved.</p>
+    </footer>
+
+    <script>
+        function toggleMenu() {
+            document.querySelector('.nav-links').classList.toggle('active');
+        }
+    </script>
 
 <script type="module">
 import { ethers } from 'ethers';
