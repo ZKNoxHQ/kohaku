@@ -439,7 +439,7 @@ $('btnCreate').addEventListener('click', async () => {
         }
 
         if (accountDeployed) {
-            setStatus(s, 'PQ Account exists: ' + expectedAddr, 'ok');
+            setStatus(s, 'PQ Account already exists.', 'ok');
             const smartEmpty = (await provider.getBalance(expectedAddr)) === 0n;
             if (!smartEmpty) $('btnSend').disabled = false;
             return;
