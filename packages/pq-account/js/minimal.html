@@ -239,13 +239,20 @@
 
         /* ── Balance ── */
         .balance-row {
-            margin-top: 12px;
-            margin-bottom: 4px;
+            margin-top: 0;
+            margin-bottom: 12px;
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
         }
+        #balanceCreateRow {
+            margin-top: 12px;
+            margin-bottom: 0;
+        }
         .balance-info {
             color: var(--text-dim);
+        }
+        .balance-fund {
+            color: var(--orange);
         }
 
         /* ── Footer ── */
@@ -281,11 +288,16 @@
     <div class="card">
 
         <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 4px;">
-            Install Ledger App from <a href="https://zknox.com/zknox-orange/sideloader" target="_blank" rel="noopener" style="color: var(--orange); text-decoration: underline; text-underline-offset: 3px;">ZKNOX Orange</a>
+            Install MLDSA App from <a href="https://zknox.com/zknox-orange/sideloader" target="_blank" rel="noopener" style="color: var(--orange); text-decoration: underline; text-underline-offset: 3px;">ZKNOX Orange</a>
         </p>
         <div class="status" id="statusInstall"></div>
 
         <hr class="divider">
+
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim);">
+            <span>DERIVATION PATH: m/44'/60'/0'/0/</span>
+            <input id="bipIndex" type="number" min="0" value="0" style="width:48px; margin:0; padding:4px 6px; text-align:center; font-size:11px;">
+        </div>
 
         <button class="btn-create" id="btnCreate">Get Account</button>
         <div class="balance-row" id="balanceCreateRow" style="display:none"></div>
@@ -293,7 +305,7 @@
 
         <hr class="divider">
 
-        <label>Account</label>
+        <label>PQ Account</label>
         <input id="from" value="" placeholder="Get Account first" readonly>
         <div class="balance-row" id="balance4337Row" style="display:none"></div>
 
@@ -329,23 +341,27 @@ import {
 import deployments from './deployments/deployments.json' assert { type: 'json' };
 const RPC      = 'https://eth-sepolia-testnet.api.pocket.network';
 const CHAIN_ID = 11155111n;
-const BIP_PATH = "m/44'/60'/0'/0/0";
+
+const $ = id => document.getElementById(id);
+function setStatus(el, msg, cls = '') { el.textContent = msg; el.className = 'status ' + cls; }
+
+const BIP_BASE = "m/44'/60'/0'/0/";
+const getBipPath = () => BIP_BASE + (parseInt($('bipIndex').value) || 0);
+
 
 const d = deployments?.default ?? deployments;
 const FACTORY = d?.sepolia?.accounts?.mldsa_k1?.address
              ?? d?.sepolia?.mldsa_k1?.address
              ?? d?.sepolia?.address;
 
-const $ = id => document.getElementById(id);
-function setStatus(el, msg, cls = '') { el.textContent = msg; el.className = 'status ' + cls; }
-
 async function showEoaBalance(provider, address, accountDeployed) {
     const row = $('balanceCreateRow');
     try {
         const wei = await provider.getBalance(address);
+        const MIN = ethers.parseEther('0.001'); // minimum to cover deployment gas
         row.style.display = 'flex';
-        if (wei === 0n && !accountDeployed) {
-            row.innerHTML = '<span class="balance-info">Fund the account ' + address + ' in order to deploy your PQ account</span>';
+        if (wei < MIN && !accountDeployed) {
+            row.innerHTML = '<span class="balance-fund">Fund the account ' + address + ' and click on GET ACCOUNT again</span>';
             return true;
         } else {
             const eth = parseFloat(ethers.formatEther(wei)).toFixed(5);
@@ -357,15 +373,16 @@ async function showEoaBalance(provider, address, accountDeployed) {
 
 async function show4337Balance(provider, address) {
     const row = $('balance4337Row');
+    if (!$('from').value) { row.style.display = 'none'; return false; }
     try {
         const wei = await provider.getBalance(address);
         row.style.display = 'flex';
         if (wei === 0n) {
-            row.innerHTML = '<span class="balance-info">Fund your PQ account in order to send a transaction</span>';
+            row.innerHTML = '<span class="balance-fund">Fund your PQA in order to send a transaction</span>';
             return true;
         } else {
             const eth = parseFloat(ethers.formatEther(wei)).toFixed(5);
-            row.innerHTML = '<span class="balance-info">Account balance: ' + eth + ' ETH</span>';
+            row.innerHTML = '<span class="balance-info">PQA BALANCE: ' + eth + ' ETH</span>';
             return false;
         }
     } catch (_) { return false; }
@@ -394,15 +411,15 @@ $('btnCreate').addEventListener('click', async () => {
         setStatus(s, 'Connecting Ledger…', 'info');
         const provider = new ethers.JsonRpcProvider(RPC);
         transport = await openTransport();
-        const signer = new LedgerEthSigner(transport, provider);
+        const signer = new LedgerEthSigner(transport, provider, getBipPath());
 
         setStatus(s, 'Reading ECDSA key…', 'info');
-        const ecdsaPub = await getEcdsaPublicKey(transport, BIP_PATH);
+        const ecdsaPub = await getEcdsaPublicKey(transport, getBipPath());
         const raw = ecdsaPub.subarray(2, 66);
         const preQuantumPubKey = ethers.getAddress('0x' + ethers.keccak256(raw).slice(-40));
 
         setStatus(s, 'Reading ML-DSA key…', 'info');
-        await deriveMldsaSeed(transport, BIP_PATH);
+        await deriveMldsaSeed(transport, getBipPath());
         const mldsaPub = await getMldsaPublicKey(transport);
         const postQuantumPubKey = to_expanded_encoded_bytes(mldsaPub);
 
@@ -505,9 +522,9 @@ $('btnSend').addEventListener('click', async () => {
         const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=pim_i3rJWDhHAhvqmPgaA3DsUo`;
 
         setStatus(s, 'Connecting Ledger…', 'info');
-        await hwEcdsa.init();
+        await hwEcdsa.init({ bip32Path: getBipPath() });
         hwMldsa.setTransport(hwEcdsa.getTransport());
-        await hwMldsa.init();
+        await hwMldsa.init({ bip32Path: getBipPath() });
 
         setStatus(s, 'Building UserOp…', 'info');
         let userOp = await createBaseUserOperation(account, to, val, '0x', provider, bundlerUrl);
@@ -517,7 +534,7 @@ $('btnSend').addEventListener('click', async () => {
         userOp = updateUserOpWithGasEstimates(userOp, gas);
 
         setStatus(s, 'Sign on Ledger…', 'info');
-        const res = await signHybridUserOp(hwEcdsa.getTransport(), BIP_PATH, userOp, ENTRY_POINT_ADDRESS, CHAIN_ID);
+        const res = await signHybridUserOp(hwEcdsa.getTransport(), getBipPath(), userOp, ENTRY_POINT_ADDRESS, CHAIN_ID);
         const ecdsaSig = ethers.concat([res.ecdsaR, res.ecdsaS, ethers.toBeHex(res.ecdsaV + 27, 1)]);
         userOp.signature = ethers.AbiCoder.defaultAbiCoder().encode(['bytes', 'bytes'], [ecdsaSig, res.mldsaSignature]);
 
