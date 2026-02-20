@@ -309,7 +309,7 @@ import {
     updateUserOpWithGasEstimates, submitUserOperation, ENTRY_POINT_ADDRESS
 } from './userOperation.js';
 import deployments from './deployments/deployments.json' assert { type: 'json' };
-import { TransportWebHID, loadApp, IntelHexParser } from './dist/ledgerjs_bundle.js';
+const { TransportWebHID, loadApp, IntelHexParser } = await import(/* @vite-ignore */ '/vendor/ledgerjs_bundle.js');
 
 const RPC      = 'https://eth-sepolia-testnet.api.pocket.network';
 const CHAIN_ID = 11155111n;
@@ -539,11 +539,20 @@ $('btnSend').addEventListener('click', async () => {
 
     try {
         const account = $('from').value.trim();
-        const to      = $('to').value.trim();
+        const toRaw   = $('to').value.trim();
         const val     = ethers.parseEther($('val').value.trim());
-        if (!account || !to) throw new Error('Fill in account and to addresses');
+        if (!account || !toRaw) throw new Error('Fill in account and to addresses');
 
         const provider   = new ethers.JsonRpcProvider(RPC);
+
+        // Resolve ENS name if needed (use mainnet for real ENS)
+        let to = toRaw;
+        if (!ethers.isAddress(toRaw)) {
+            setStatus(s, `Resolving ${toRaw}…`, 'info');
+            const mainnet = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
+            to = await mainnet.resolveName(toRaw);
+            if (!to) throw new Error(`Could not resolve ENS name: ${toRaw}`);
+        }
         const bundlerUrl = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=pim_i3rJWDhHAhvqmPgaA3DsUo`;
 
         setStatus(s, 'Connecting Ledger…', 'info');
