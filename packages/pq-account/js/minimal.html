@@ -237,6 +237,17 @@
         .status.err  { color: var(--red); }
         .status.info { color: var(--text-dim); }
 
+        /* ── Balance ── */
+        .balance-row {
+            margin-top: 12px;
+            margin-bottom: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+        .balance-info {
+            color: var(--text-dim);
+        }
+
         /* ── Footer ── */
         .footer {
             text-align: center;
@@ -277,12 +288,14 @@
         <hr class="divider">
 
         <button class="btn-create" id="btnCreate">Get Account</button>
+        <div class="balance-row" id="balanceCreateRow" style="display:none"></div>
         <div class="status" id="statusCreate"></div>
 
         <hr class="divider">
 
         <label>Account</label>
         <input id="from" value="" placeholder="Get Account first" readonly>
+        <div class="balance-row" id="balance4337Row" style="display:none"></div>
 
         <label>To</label>
         <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
@@ -326,6 +339,38 @@ const FACTORY = d?.sepolia?.accounts?.mldsa_k1?.address
 const $ = id => document.getElementById(id);
 function setStatus(el, msg, cls = '') { el.textContent = msg; el.className = 'status ' + cls; }
 
+async function showEoaBalance(provider, address, accountDeployed) {
+    const row = $('balanceCreateRow');
+    try {
+        const wei = await provider.getBalance(address);
+        row.style.display = 'flex';
+        if (wei === 0n && !accountDeployed) {
+            row.innerHTML = '<span class="balance-info">Fund the account ' + address + ' in order to deploy your PQ account</span>';
+            return true;
+        } else {
+            const eth = parseFloat(ethers.formatEther(wei)).toFixed(5);
+            row.innerHTML = '<span class="balance-info">EOA BALANCE: ' + eth + ' ETH</span>';
+            return false;
+        }
+    } catch (_) { return false; }
+}
+
+async function show4337Balance(provider, address) {
+    const row = $('balance4337Row');
+    try {
+        const wei = await provider.getBalance(address);
+        row.style.display = 'flex';
+        if (wei === 0n) {
+            row.innerHTML = '<span class="balance-info">Fund your PQ account in order to send a transaction</span>';
+            return true;
+        } else {
+            const eth = parseFloat(ethers.formatEther(wei)).toFixed(5);
+            row.innerHTML = '<span class="balance-info">Account balance: ' + eth + ' ETH</span>';
+            return false;
+        }
+    } catch (_) { return false; }
+}
+
 const FACTORY_ABI = [
     "function createAccount(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external returns (address)",
     "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
@@ -365,10 +410,21 @@ $('btnCreate').addEventListener('click', async () => {
         const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
 
         const expectedAddr = await factory.getFunction('getAddress').staticCall(preQuantumPubKey, postQuantumPubKey);
-        if ((await provider.getCode(expectedAddr)) !== '0x') {
+        const accountDeployed = (await provider.getCode(expectedAddr)) !== '0x';
+
+        $('from').value = accountDeployed ? expectedAddr : '';
+        const eoaEmpty = await showEoaBalance(provider, preQuantumPubKey, accountDeployed);
+        await show4337Balance(provider, expectedAddr);
+
+        if (!accountDeployed && eoaEmpty) {
+            setStatus(s, '', '');
+            return;
+        }
+
+        if (accountDeployed) {
             setStatus(s, 'Account exists: ' + expectedAddr, 'ok');
-            $('from').value = expectedAddr;
-            $('btnSend').disabled = false;
+            const smartEmpty = (await provider.getBalance(expectedAddr)) === 0n;
+            if (!smartEmpty) $('btnSend').disabled = false;
             return;
         }
 
@@ -385,15 +441,16 @@ $('btnCreate').addEventListener('click', async () => {
         await tx.wait();
 
         $('from').value = expectedAddr;
-        $('btnSend').disabled = false;
-        setStatus(s, '✓ ' + expectedAddr, 'ok');
+        setStatus(s, 'Account created: ' + expectedAddr, 'ok');
+        await showEoaBalance(provider, preQuantumPubKey, true);
+        await show4337Balance(provider, expectedAddr);
 
     } catch (e) {
         const appNotOpen = e.message.includes('6d00') || e.message.includes('6e00')
             || e.message.includes('6511') || e.message.includes('locked');
         setStatus(s, appNotOpen ? 'Open the app on your Ledger' : e.message, appNotOpen ? 'info' : 'err');
     } finally {
-        try { if (transport) await transport.close(); } catch {}
+        try { if (transport) await transport.close(); } catch (_) {}
         btn.disabled = false;
     }
 });
@@ -418,7 +475,7 @@ async function pollReceipt(hash, bundlerUrl, timeout = 120_000) {
                 body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getUserOperationReceipt', params: [hash] })
             })).json();
             if (r.result) return r.result;
-        } catch {}
+        } catch (_) {}
         await new Promise(r => setTimeout(r, 3000));
     }
     return null;
@@ -477,7 +534,7 @@ $('btnSend').addEventListener('click', async () => {
     } catch (e) {
         setStatus(s, e.message, 'err');
     } finally {
-        try { await hwMldsa.cleanup(); await hwEcdsa.cleanup(); } catch {}
+        try { await hwMldsa.cleanup(); await hwEcdsa.cleanup(); } catch (_) {}
         btn.disabled = false;
     }
 });
