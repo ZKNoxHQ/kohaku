@@ -2,6 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ZKNox · Hardware Post-Quantum Ethereum</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -19,6 +20,8 @@
             --blue: #3b82f6;
             --blue-dim: rgba(59, 130, 246, .08);
             --red: #f43f5e;
+            --orange: #f59e0b;
+            --orange-dim: rgba(245, 158, 11, .08);
             --radius: 10px;
         }
 
@@ -31,12 +34,11 @@
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            padding: 48px 20px 60px;
+            padding: 48px 16px 60px;
             position: relative;
             overflow-x: hidden;
         }
 
-        /* subtle grid background */
         body::before {
             content: '';
             position: fixed; inset: 0;
@@ -48,7 +50,6 @@
             pointer-events: none;
         }
 
-        /* top glow */
         body::after {
             content: '';
             position: fixed;
@@ -60,7 +61,8 @@
         }
 
         .container {
-            width: 460px;
+            width: 100%;
+            max-width: 460px;
             position: relative;
             z-index: 1;
         }
@@ -70,7 +72,6 @@
             text-align: center;
             margin-bottom: 36px;
         }
-
         .header .chip {
             display: inline-block;
             padding: 5px 14px;
@@ -84,7 +85,6 @@
             background: var(--accent-dim);
             margin-bottom: 20px;
         }
-
         .header h1 {
             font-size: 28px;
             font-weight: 700;
@@ -93,14 +93,12 @@
             color: #fff;
             margin-bottom: 8px;
         }
-
         .header h1 span {
             background: linear-gradient(135deg, var(--accent), #00b4d8);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-
         .header .sub {
             font-size: 13px;
             color: var(--text-dim);
@@ -112,11 +110,16 @@
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: 16px;
-            padding: 32px;
+            padding: 28px 24px;
             position: relative;
             overflow: hidden;
+            margin-bottom: 16px;
         }
-
+        @media (max-width: 480px) {
+            .card { padding: 24px 16px; border-radius: 12px; }
+            .header h1 { font-size: 22px; }
+            body { padding-top: 32px; }
+        }
         .card::before {
             content: '';
             position: absolute;
@@ -137,7 +140,6 @@
             align-items: center;
             gap: 8px;
         }
-
         .section-label::after {
             content: '';
             flex: 1;
@@ -163,7 +165,6 @@
             color: var(--text-dim);
             margin-bottom: 6px;
         }
-
         input {
             width: 100%;
             padding: 12px 14px;
@@ -176,13 +177,11 @@
             margin-bottom: 16px;
             transition: border-color .2s, box-shadow .2s;
         }
-
         input:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-dim);
         }
-
         input::placeholder { color: var(--text-dim); }
 
         /* ── Buttons ── */
@@ -199,27 +198,24 @@
             cursor: pointer;
             transition: all .2s;
         }
-
         .btn-install {
-            background: rgba(245, 158, 11, .08);
-            color: #f59e0b;
+            background: var(--orange-dim);
+            color: var(--orange);
             border: 1px solid rgba(245, 158, 11, .2);
         }
-        .btn-install:hover { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .4); }
-
+        .btn-install:hover:not(:disabled) { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .4); }
         .btn-create {
             background: var(--blue-dim);
             color: var(--blue);
             border: 1px solid rgba(59, 130, 246, .2);
         }
-        .btn-create:hover { background: rgba(59, 130, 246, .15); border-color: rgba(59, 130, 246, .4); }
-
+        .btn-create:hover:not(:disabled) { background: rgba(59, 130, 246, .15); border-color: rgba(59, 130, 246, .4); }
         .btn-send {
             background: var(--accent-dim);
             color: var(--accent);
             border: 1px solid rgba(0, 232, 123, .2);
         }
-        .btn-send:hover { background: rgba(0, 232, 123, .15); border-color: rgba(0, 232, 123, .4); }
+        .btn-send:hover:not(:disabled) { background: rgba(0, 232, 123, .15); border-color: rgba(0, 232, 123, .4); }
 
         button:disabled { opacity: .3; cursor: not-allowed; }
         button:active:not(:disabled) { transform: scale(.99); }
@@ -241,7 +237,7 @@
         /* ── Footer ── */
         .footer {
             text-align: center;
-            margin-top: 28px;
+            margin-top: 12px;
             font-family: 'JetBrains Mono', monospace;
             font-size: 10px;
             letter-spacing: 1px;
@@ -275,13 +271,13 @@
 
         <hr class="divider">
 
-        <button class="btn-create" id="btnCreate" disabled>Get Account</button>
+        <button class="btn-create" id="btnCreate">Get Account</button>
         <div class="status" id="statusCreate"></div>
 
         <hr class="divider">
 
         <label>Account</label>
-        <input id="from" value="" placeholder="Install app then Get Account" readonly>
+        <input id="from" value="" placeholder="Get Account first" readonly>
 
         <label>To</label>
         <input id="to" value="0xdA4e72C962C201D77d515B02dEd76B1a41E1DBab">
@@ -313,10 +309,12 @@ import {
     updateUserOpWithGasEstimates, submitUserOperation, ENTRY_POINT_ADDRESS
 } from './userOperation.js';
 import deployments from './deployments/deployments.json' assert { type: 'json' };
+import { TransportWebHID, loadApp, IntelHexParser } from './dist/ledgerjs_bundle.js';
 
 const RPC      = 'https://eth-sepolia-testnet.api.pocket.network';
 const CHAIN_ID = 11155111n;
 const BIP_PATH = "m/44'/60'/0'/0/0";
+const APP_DIR  = './apps/mldsa';
 
 const d = deployments?.default ?? deployments;
 const FACTORY = d?.sepolia?.accounts?.mldsa_k1?.address
@@ -331,61 +329,119 @@ const FACTORY_ABI = [
     "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
 ];
 
-// ── INSTALL APP ──
+// ─────────────────────────────────────────────
+// Install
+// ─────────────────────────────────────────────
 
-const APDU_URL = './app.txt';
+let installTransport = null;
 
-function parseApduFile(text) {
-    return text.replace(/\r/g, '').split('\n')
-        .map(l => l.trim())
-        .filter(l => l.length > 0 && !l.startsWith('#') && !l.startsWith('//') && !l.startsWith('<'))
-        .map(l => l.replace(/^=>?\s*/, ''))
-        .filter(l => /^[0-9a-fA-F]+$/.test(l) && l.length >= 8);
+const sInstall  = document.getElementById('statusInstall');
+const sCreate   = document.getElementById('statusCreate');
+
+function parseMakefile(content) {
+    const result = {};
+    for (const line of content.split('\n')) {
+        const m = line.match(/^\s*(APPNAME|APPVERSION_M|APPVERSION_N|APPVERSION_P|CURVE_APP_LOAD_PARAMS|PATH_APP_LOAD_PARAMS)\s*[:?]?=\s*(.+)/);
+        if (m) {
+            const key = m[1].trim();
+            let val = m[2].trim().replace(/#.*$/, '').trim();
+            if (val.includes('$(')) continue;
+            if (!(key in result)) result[key] = val;
+        }
+    }
+    if (result.APPVERSION_M && result.APPVERSION_N && result.APPVERSION_P)
+        result.APPVERSION = `${result.APPVERSION_M}.${result.APPVERSION_N}.${result.APPVERSION_P}`;
+    return result;
 }
 
-$('btnInstall').addEventListener('click', async () => {
-    const btn = $('btnInstall');
-    const s   = $('statusInstall');
-    btn.disabled = true;
-    let transport;
+function parseMapFile(content) {
+    const symbols = {};
+    for (const line of content.split('\n')) {
+        const match = line.match(/^([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+.*\s+(_\w+)\s*=\s*\./);
+        if (match) symbols[match[2]] = parseInt(match[1], 16);
+    }
+    return symbols;
+}
+
+// ── INSTALL ──
+document.getElementById('btnInstall').addEventListener('click', async () => {
+    document.getElementById('btnInstall').disabled = true;
 
     try {
-        setStatus(s, 'Downloading app…', 'info');
-        const resp = await fetch(APDU_URL);
-        if (!resp.ok) throw new Error(`Failed to fetch app.apdu (HTTP ${resp.status})`);
-        const text = await resp.text();
-
-        if (text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
-            throw new Error('app.apdu not found (got HTML — check the file is deployed on Netlify)');
+        if (!installTransport) {
+            setStatus(sInstall, 'Connecting…', 'info');
+            installTransport = await TransportWebHID.request(true);
         }
 
-        const apdus = parseApduFile(text);
-        if (apdus.length === 0) {
-            const preview = text.substring(0, 120);
-            throw new Error('No valid APDU commands found. File starts with: ' + preview);
+        let apiLevel = 25;
+        const manifestResp = await fetch(`${APP_DIR}/manifest.json`);
+        if (manifestResp.ok) {
+            const manifest = await manifestResp.json();
+            apiLevel = manifest.api_level ?? apiLevel;
         }
 
-        setStatus(s, `Parsed ${apdus.length} APDUs. Connecting Ledger…`, 'info');
-        transport = await openTransport();
-
-        for (let i = 0; i < apdus.length; i++) {
-            setStatus(s, `Sending APDU ${i + 1}/${apdus.length}…`, 'info');
-            const cmd = Uint8Array.from(apdus[i].match(/.{2}/g).map(b => parseInt(b, 16)));
-            await transport.exchange(cmd);
+        let appName = 'MLDSA', appVersion = '1.0.0', curves = null, paths = null;
+        const mkResp = await fetch(`${APP_DIR}/Makefile`);
+        if (mkResp.ok) {
+            const mk = parseMakefile(await mkResp.text());
+            if (mk.APPNAME)    appName    = mk.APPNAME.replace(/^"(.*)"$/, '$1');
+            if (mk.APPVERSION) appVersion = mk.APPVERSION;
+            if (mk.CURVE_APP_LOAD_PARAMS)
+                curves = mk.CURVE_APP_LOAD_PARAMS.split(/\s+/).filter(Boolean);
+            if (mk.PATH_APP_LOAD_PARAMS) {
+                const quoted = mk.PATH_APP_LOAD_PARAMS.match(/"([^"]+)"/g);
+                paths = quoted ? quoted.map(p => p.replace(/"/g, '')) : [mk.PATH_APP_LOAD_PARAMS.trim()];
+            }
         }
 
-        setStatus(s, '✓ App installed', 'ok');
-        $('btnCreate').disabled = false;
+        let dataSize = 0, installParamsSize = 0;
+        const mapResp = await fetch(`${APP_DIR}/app.map`);
+        if (mapResp.ok) {
+            const sym = parseMapFile(await mapResp.text());
+            if (sym._envram_data !== undefined && sym._nvram_data !== undefined)
+                dataSize = sym._envram_data - sym._nvram_data;
+            if (sym._einstall_parameters !== undefined && sym._install_parameters !== undefined)
+                installParamsSize = sym._einstall_parameters - sym._install_parameters;
+        }
+
+        const hexResp = await fetch(`${APP_DIR}/app.hex`);
+        if (!hexResp.ok) throw new Error(`app.hex not found (HTTP ${hexResp.status})`);
+        const hexText = await hexResp.text();
+
+        setStatus(sInstall, 'Approve on Ledger…', 'info');
+
+        const hash = await loadApp(installTransport, {
+            targetId:          0x33100004,
+            targetVersion:     '',
+            fileName:          hexText,
+            appName,
+            appVersion,
+            curves,
+            paths,
+            icon:              null,
+            dataSize:          dataSize > 0 ? dataSize : null,
+            installParamsSize: installParamsSize > 0 ? installParamsSize : null,
+            appFlags:          0,
+            apiLevel,
+            delete:            true,
+            debug:             true,
+        });
+
+        setStatus(sInstall, '✓ Installed — ' + hash.slice(0, 16) + '…', 'ok');
+        setStatus(sCreate, 'Open the app on your Ledger', 'info');
 
     } catch (e) {
-        setStatus(s, e.message, 'err');
+        setStatus(sInstall, e.message, 'err');
+        console.error(e);
     } finally {
-        try { if (transport) await transport.close(); } catch {}
-        btn.disabled = false;
+        try { if (installTransport) { await installTransport.close(); installTransport = null; } } catch {}
+        document.getElementById('btnInstall').disabled = false;
     }
 });
 
-// ── CREATE ACCOUNT ──
+// ─────────────────────────────────────────────
+// Get Account (unchanged from original)
+// ─────────────────────────────────────────────
 
 $('btnCreate').addEventListener('click', async () => {
     const btn = $('btnCreate');
@@ -441,14 +497,18 @@ $('btnCreate').addEventListener('click', async () => {
         setStatus(s, '✓ ' + expectedAddr, 'ok');
 
     } catch (e) {
-        setStatus(s, e.message, 'err');
+        const appNotOpen = e.message.includes('6d00') || e.message.includes('6e00')
+            || e.message.includes('6511') || e.message.includes('locked');
+        setStatus(s, appNotOpen ? 'Open the app on your Ledger' : e.message, appNotOpen ? 'info' : 'err');
     } finally {
         try { if (transport) await transport.close(); } catch {}
         btn.disabled = false;
     }
 });
 
-// ── SEND TRANSACTION ──
+// ─────────────────────────────────────────────
+// Send Transaction (unchanged from original)
+// ─────────────────────────────────────────────
 
 function dummySignature() {
     return ethers.AbiCoder.defaultAbiCoder().encode(
@@ -508,9 +568,10 @@ $('btnSend').addEventListener('click', async () => {
 
         setStatus(s, 'Waiting for receipt…', 'info');
         const receipt = await pollReceipt(hash, bundlerUrl);
-        setStatus(s, receipt?.receipt?.transactionHash
-            ? '✓ ' + receipt.receipt.transactionHash
-            : 'Submitted: ' + hash, 'ok');
+        const txHash = receipt?.receipt?.transactionHash ?? hash;
+        const link = `https://sepolia.etherscan.io/tx/${txHash}`;
+        s.innerHTML = `✓ <a href="${link}" target="_blank" style="color:var(--accent)">${txHash.slice(0,16)}…</a>`;
+        s.className = 'status ok';
 
     } catch (e) {
         setStatus(s, e.message, 'err');

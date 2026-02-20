@@ -2,14 +2,14 @@
   command = "npm install && npm run build"
   publish = "dist"
   
-[[headers]]
-  for = "/*.txt"
-  [headers.values]
-    Content-Type = "text/plain"
-
 [[redirects]]
   from = "/minimal.html"
   to = "/minimal.html"
+  status = 200
+
+[[redirects]]
+  from = "/apdu.txt"
+  to = "/apdu.txt"
   status = 200
 
 [[redirects]]
