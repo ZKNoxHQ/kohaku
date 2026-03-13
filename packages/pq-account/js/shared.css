@@ -1,0 +1,306 @@
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    background: #f8f9fb;
+    color: #1a1a2e;
+    line-height: 1.5;
+}
+
+/* ── Navigation ── */
+nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+    background: #fff;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid #e2e5ea;
+}
+
+nav a {
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.15s ease;
+}
+
+nav a:hover {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+nav a.active {
+    background: #0f172a;
+    color: #fff;
+}
+
+/* ── Cards ── */
+.config-section {
+    background: #fff;
+    padding: 28px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    border: 1px solid #e2e5ea;
+}
+
+.config-section h2 {
+    margin: 0 0 20px;
+    color: #0f172a;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+/* ── Form Fields ── */
+.input-group {
+    margin-bottom: 18px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: #334155;
+    font-size: 13px;
+}
+
+.input-group input[type="text"],
+.input-group input,
+.input-group select {
+    width: 100%;
+    padding: 10px 14px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    border: 1.5px solid #d1d5db;
+    border-radius: 8px;
+    box-sizing: border-box;
+    background: #fff;
+    color: #1a1a2e;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input-group input:focus,
+.input-group select:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.input-group small {
+    display: block;
+    margin-top: 4px;
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+/* ── Layout helpers ── */
+.twocols {
+    display: flex;
+    gap: 16px;
+}
+
+.twocols .input-group {
+    flex: 1;
+}
+
+@media (max-width: 640px) {
+    .twocols { flex-direction: column; gap: 0; }
+}
+
+/* ── Buttons ── */
+.button-container {
+    text-align: center;
+    margin: 24px 0 8px;
+}
+
+button {
+    background: #4f46e5;
+    color: #fff;
+    padding: 12px 32px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+button:hover {
+    background: #4338ca;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+button:disabled {
+    background: #cbd5e1;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+/* ── Mode Toggle (shared by both pages) ── */
+.mode-toggle,
+.signing-mode-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1.5px solid #d1d5db;
+}
+
+.mode-toggle button,
+.signing-mode-toggle label {
+    flex: 1;
+    text-align: center;
+    padding: 11px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fafbfc;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.mode-toggle button + button,
+.signing-mode-toggle label + input + label,
+.signing-mode-toggle input + label + input + label {
+    border-left: 1.5px solid #d1d5db;
+}
+
+.mode-toggle button:hover,
+.signing-mode-toggle label:hover {
+    background: #f1f5f9;
+    transform: none;
+    box-shadow: none;
+}
+
+.mode-toggle button.active {
+    background: #0f172a;
+    color: #fff;
+    border-color: #0f172a;
+}
+
+.mode-toggle button.active:hover {
+    background: #0f172a;
+    transform: none;
+    box-shadow: none;
+}
+
+.mode-toggle button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: #fafbfc;
+    color: #64748b;
+}
+
+.mode-toggle button:disabled:hover {
+    background: #fafbfc;
+    transform: none;
+    box-shadow: none;
+}
+
+.signing-mode-toggle input[type="radio"] { display: none; }
+
+.signing-mode-toggle input[type="radio"]:checked + label {
+    background: #0f172a;
+    color: #fff;
+}
+
+.signing-mode-toggle input[type="radio"]:disabled + label {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ── Mode panels ── */
+.mode-panel { display: none; }
+.mode-panel.active { display: block; }
+
+/* ── Info / Warning banners ── */
+.warning {
+    background: #fffbeb;
+    border: 1px solid #fbbf24;
+    border-left: 4px solid #f59e0b;
+    padding: 14px 18px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    color: #92400e;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.warning strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ledger-info {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    padding: 14px 18px;
+    border-radius: 10px;
+    color: #166534;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.ledger-info code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.falcon-info {
+    background: #eff6ff;
+    border: 1px solid #93c5fd;
+    padding: 14px 18px;
+    border-radius: 10px;
+    color: #1e40af;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+    display: none;
+}
+
+/* ── Output console ── */
+#output {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 24px;
+    border-radius: 14px;
+    margin-top: 16px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: calc(100vh - 520px);
+    max-height: none;
+    overflow-y: visible;
+    border: 1px solid #1e293b;
+}
+
+#output:empty {
+    min-height: 60px;
+}
