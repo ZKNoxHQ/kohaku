@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { redirectConsole } from './utils.js';
+import { deriveSeeds } from './pqslip.js';
 import { signHybridUserOp } from './hardware-signer/ledgerTransport.js';
 
 import {
@@ -54,24 +55,12 @@ export async function sendERC4337Transaction(
     provider, bundlerUrl, pqAlgo = 'mldsa'
 ) {
     const { pq, ecdsa } = getSigners(signingMode, pqAlgo);
-    const algoLabel = pqAlgo === 'falcon' ? 'Falcon-512' : 'ML-DSA-44';
 
     try {
         const network = await provider.getNetwork();
-        const accountBalance = await provider.getBalance(accountAddress);
 
-        console.log("Sending ERC-4337 transaction (" + algoLabel + ")");
-        console.log("- From: " + accountAddress);
-        console.log("- To: " + targetAddress);
-        console.log("- Value: " + ethers.formatEther(value) + " ETH");
-        console.log("- Network: " + network.name + " (Chain ID: " + network.chainId + ")");
-        console.log("- Balance: " + ethers.formatEther(accountBalance) + " ETH");
+        console.log("Initialising signers…");
 
-        if (accountBalance === 0n) {
-            console.log("⚠️  Account has no balance — send ETH to: " + accountAddress);
-        }
-
-        // Initialise signers
         if (signingMode === 'ledger') {
             await ecdsa.init();
             hwMldsa.setTransport(ecdsa.getTransport());
@@ -116,47 +105,34 @@ export async function sendERC4337Transaction(
                 userOp, ENTRY_POINT_ADDRESS, network.chainId, ecdsa, pq
             );
         }
-        console.log("✅ Hybrid signature generated (ECDSA + " + algoLabel + ")");
+        console.log("Signature ready.");
 
         // Submit or preview
         if (!bundlerUrl || bundlerUrl.trim() === '' || bundlerUrl.includes('example.com')) {
-            console.log("ℹ️  No valid bundler URL — UserOp created and signed but not submitted.");
-            console.log(JSON.stringify({
-                sender:    userOp.sender ?? "<undefined>",
-                nonce:     '0x' + ((userOp.nonce ?? 0).toString(16)),
-                callData:  userOp.callData  ? userOp.callData.slice(0, 50) + '...'  : "<undefined>",
-                signature: userOp.signature ? userOp.signature.slice(0, 50) + '...' : "<undefined>"
-            }, null, 2));
+            console.log("UserOp signed — no bundler URL configured.");
             return { success: true, userOp, message: "UserOperation created and signed (bundler needed)" };
         }
 
         try {
+            console.log("Submitting to bundler…");
             const userOpHash = await submitUserOperation(userOp, bundlerUrl, ENTRY_POINT_ADDRESS);
-            console.log("🎉 UserOp submitted — hash: " + userOpHash);
-            console.log("⏳ Waiting for transaction to be mined...");
+            console.log("Mining… " + userOpHash);
 
             const receipt = await waitForUserOperationReceipt(userOpHash, bundlerUrl);
             if (receipt) {
-                console.log("✅ Transaction mined!");
-                if (receipt.receipt?.transactionHash) {
-                    console.log("- Tx Hash: " + receipt.receipt.transactionHash);
-                }
-                if (receipt.receipt?.blockNumber) {
-                    const block = typeof receipt.receipt.blockNumber === 'string'
-                        ? parseInt(receipt.receipt.blockNumber, 16)
-                        : receipt.receipt.blockNumber;
-                    console.log("- Block: " + block);
-                }
+                const txHash = receipt.receipt?.transactionHash;
                 if (receipt.success === false) {
-                    console.log("⚠️  UserOp execution reverted on-chain");
+                    console.error("Transaction reverted" + (txHash ? ": " + txHash : ""));
+                } else {
+                    console.log("Transaction mined: " + (txHash || userOpHash));
                 }
             } else {
-                console.log("⚠️  Timed out waiting for receipt. The tx may still be pending.");
+                console.log("Timed out — transaction may still be pending.");
             }
 
             return { success: true, userOpHash, receipt };
         } catch (error) {
-            console.error("Failed to submit to bundler: " + error.message);
+            console.error("Bundler error: " + error.message);
             return { success: false, error: error.message, userOp };
         }
 
@@ -172,61 +148,40 @@ export async function sendERC4337Transaction(
 // ─── UI Setup ───────────────────────────────────────────────────────────
 
 function setup() {
-    const button  = document.getElementById('sendTx');
-    const output  = document.getElementById('output');
-    const softSeedGroup  = document.getElementById('softSeedGroup');
-    const ledgerInfoGroup = document.getElementById('ledgerInfoGroup');
-    const signingModeRadios = document.getElementsByName('signingMode');
+    const sendBtn       = document.getElementById('sendTx');
+    const sendLedgerBtn = document.getElementById('sendTxLedger');
+    const output        = document.getElementById('output');
 
-    if (!button || !output) { console.error('Missing UI elements'); return; }
+    if (!output) { console.error('Missing UI elements'); return; }
 
     redirectConsole(output);
+    console.log('Ready.');
 
-    function updateSeedVisibility() {
-        const mode = document.querySelector('input[name="signingMode"]:checked').value;
-        if (softSeedGroup)   softSeedGroup.style.display  = (mode === 'soft') ? '' : 'none';
-        if (ledgerInfoGroup) ledgerInfoGroup.style.display = (mode === 'ledger') ? '' : 'none';
-    }
-    signingModeRadios.forEach(r => r.addEventListener('change', updateSeedVisibility));
-    updateSeedVisibility();
-
-    // Disable Ledger radio when Falcon is selected
-    const pqAlgoSelect = document.getElementById('pqAlgo');
-    const ledgerRadio  = document.getElementById('modeLedger');
-    if (pqAlgoSelect && ledgerRadio) {
-        pqAlgoSelect.addEventListener('change', () => {
-            const isFalcon = pqAlgoSelect.value === 'falcon';
-            ledgerRadio.disabled = isFalcon;
-            if (isFalcon && ledgerRadio.checked) {
-                document.getElementById('modeSoft').checked = true;
-                updateSeedVisibility();
-            }
-        });
-    }
-
-    output.textContent = '✅ Ready to send a transaction.\nChoose your signing mode and fill in the details above.\n';
-
-    button.addEventListener('click', async () => {
-        button.disabled = true;
-        output.textContent = '';
+    async function run(mode) {
+        const btn = mode === 'ledger' ? sendLedgerBtn : sendBtn;
+        if (btn) btn.disabled = true;
+        output.innerHTML = '';
 
         try {
             const rpcUrl = document.getElementById('rpcUrl')?.value.trim();
-            if (!rpcUrl) { console.log('❌ Please enter an RPC URL.'); return; }
+            if (!rpcUrl) { console.error('Please enter an RPC URL.'); return; }
 
-            console.log('🔌 Connecting to RPC: ' + rpcUrl);
+            console.log('Connecting…');
             const provider = new ethers.JsonRpcProvider(rpcUrl);
             const network = await provider.getNetwork();
-            console.log('✅ Connected to ' + network.name + ' (Chain ID: ' + network.chainId + ')');
 
-            const signingMode = document.querySelector('input[name="signingMode"]:checked').value;
             const pqAlgo = document.getElementById('pqAlgo')?.value || 'mldsa';
 
-            const preQuantumSeed = signingMode === 'ledger'
-                ? ''
-                : document.getElementById('preQuantumSeed').value.trim();
+            let preQuantumSeed = '';
+            let postQuantumSeed = '';
 
-            const postQuantumSeed = document.getElementById('postQuantumSeed')?.value.trim() || '';
+            if (mode !== 'ledger') {
+                const mnemonic = document.getElementById('mnemonic').value.trim();
+                if (!mnemonic) { console.error('Please enter a BIP-39 mnemonic phrase.'); return; }
+                const derived = deriveSeeds(mnemonic, pqAlgo);
+                preQuantumSeed = derived.preQuantumSeed;
+                postQuantumSeed = derived.postQuantumSeed;
+            }
             const pimlicoApiKey   = document.getElementById('pimlicoApiKey').value.trim();
             const accountAddress  = document.getElementById('accountAddress').value.trim();
             const targetAddress   = document.getElementById('targetAddress').value.trim();
@@ -237,15 +192,18 @@ function setup() {
 
             await sendERC4337Transaction(
                 accountAddress, targetAddress, ethers.parseEther(valueEth), callData,
-                preQuantumSeed, signingMode, postQuantumSeed,
+                preQuantumSeed, mode, postQuantumSeed,
                 provider, bundlerUrl, pqAlgo
             );
         } catch (error) {
             console.error('Error: ' + error.message);
         } finally {
-            button.disabled = false;
+            if (btn) btn.disabled = false;
         }
-    });
+    }
+
+    if (sendBtn)       sendBtn.addEventListener('click', () => run('soft'));
+    if (sendLedgerBtn) sendLedgerBtn.addEventListener('click', () => run('ledger'));
 }
 
 if (document.readyState === 'loading') {
@@ -263,7 +221,6 @@ async function waitForUserOperationReceipt(
     userOpHash, bundlerUrl, timeoutMs = 120_000, intervalMs = 3_000
 ) {
     const deadline = Date.now() + timeoutMs;
-    let elapsed = 0;
 
     while (Date.now() < deadline) {
         try {
@@ -280,10 +237,6 @@ async function waitForUserOperationReceipt(
             if (result.result) return result.result;
         } catch (_) { /* network hiccup — keep polling */ }
 
-        elapsed += intervalMs;
-        if (elapsed % 15_000 === 0) {
-            console.log("  ⏳ Still waiting... " + (elapsed / 1000) + "s elapsed");
-        }
         await new Promise(resolve => setTimeout(resolve, intervalMs));
     }
     return null;

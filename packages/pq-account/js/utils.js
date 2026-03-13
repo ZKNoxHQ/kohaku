@@ -46,8 +46,10 @@ export function explorerTxUrl(chainId, txHash) {
 }
 
 /**
- * Redirect console.log / console.error into a DOM element so the
- * user sees output in the page.  Call once during setup().
+ * Redirect console.log / console.error into a DOM element as styled
+ * single-line status entries. The latest message is always visible
+ * and highlighted; older entries dim as history.
+ * Call once during setup().
  */
 export function redirectConsole(outputEl) {
     const originalLog = console.log;
@@ -57,15 +59,18 @@ export function redirectConsole(outputEl) {
         return args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
     }
 
+    function setStatus(text, isError) {
+        outputEl.textContent = text;
+        outputEl.className = 'status-line' + (isError ? ' error' : '');
+    }
+
     console.log = function (...args) {
-        outputEl.textContent += format(args) + '\n';
-        outputEl.scrollTop = outputEl.scrollHeight;
+        setStatus(format(args), false);
         originalLog.apply(console, args);
     };
 
     console.error = function (...args) {
-        outputEl.textContent += '❌ ' + format(args) + '\n';
-        outputEl.scrollTop = outputEl.scrollHeight;
+        setStatus(format(args), true);
         originalError.apply(console, args);
     };
 }

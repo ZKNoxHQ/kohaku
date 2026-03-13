@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
-import { nttCompact, redirectConsole, explorerTxUrl } from './utils.js';
+import { nttCompact, redirectConsole } from './utils.js';
 import { to_expanded_encoded_bytes } from './utils_mldsa.js';
+import { deriveSeeds } from './pqslip.js';
 import * as softEcdsaKeygen from './software-signer/ecdsaKeygen.js';
 import * as softMldsaKeygen from './software-signer/mldsaKeygen.js';
 import * as softFalconKeygen from './software-signer/falconKeygen.js';
@@ -13,15 +14,6 @@ import {
 import { LedgerEthSigner } from './LedgerEthSigner.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────
-
-function validateSeed(seed, name) {
-    if (!seed.startsWith("0x"))
-        throw new Error(`${name} must start with "0x"`);
-    if (seed.length !== 66)
-        throw new Error(`${name} must be 32 bytes (66 characters including 0x, got ${seed.length})`);
-    if (!/^0x[0-9a-fA-F]{64}$/.test(seed))
-        throw new Error(`${name} contains invalid hex characters`);
-}
 
 /**
  * Encode a Falcon-512 public key for the on-chain verifier.
@@ -70,27 +62,20 @@ async function main(mode) {
             const rpcUrl = document.getElementById('rpcUrl')?.value.trim();
             if (!rpcUrl) { console.error("Please enter an RPC URL."); return; }
 
-            console.log("🔌 Connecting to RPC: " + rpcUrl);
             provider = new ethers.JsonRpcProvider(rpcUrl);
-            const network = await provider.getNetwork();
-            console.log("- Network: " + network.name + " (Chain ID: " + network.chainId + ")");
+            await provider.getNetwork();
 
-            console.log("🔐 Connecting to Ledger device...");
+            console.log("Connecting to Ledger…");
             transport = await openTransport();
             signer = new LedgerEthSigner(transport, provider);
-
-            const address = await signer.getAddress();
-            const balance = await provider.getBalance(address);
-            console.log("✅ Ledger connected — " + address);
-            console.log("- Balance: " + ethers.formatEther(balance) + " ETH");
+            await signer.getAddress();
         } else {
             if (typeof window === 'undefined' || !window.ethereum) {
                 throw new Error(
-                    "No wallet detected. Install MetaMask (https://metamask.io/) or Rabby (https://rabby.io/)."
+                    "No wallet detected. Install MetaMask or Rabby."
                 );
             }
 
-            // Ensure wallet chain matches dropdown
             const networkToChainId = {
                 sepolia: '0xaa36a7',
                 arbitrumSepolia: '0x66eee', baseSepolia: '0x14a34',
@@ -102,53 +87,44 @@ async function main(mode) {
 
             const currentChain = await window.ethereum.request({ method: 'eth_chainId' });
             if (expectedChainHex && currentChain.toLowerCase() !== expectedChainHex.toLowerCase()) {
-                console.log("⚠️ Wallet on different chain, switching to " + selectedNetwork + "...");
                 try {
                     await window.ethereum.request({
                         method: 'wallet_switchEthereumChain',
                         params: [{ chainId: expectedChainHex }],
                     });
                 } catch (_) {
-                    throw new Error("Please switch your wallet to " + selectedNetwork + " (" + expectedChainHex + ").");
+                    throw new Error("Please switch your wallet to " + selectedNetwork + ".");
                 }
             }
 
+            console.log("Connecting wallet…");
             provider = new ethers.BrowserProvider(window.ethereum);
             signer = await provider.getSigner();
-
-            const address = await signer.getAddress();
-            const balance = await provider.getBalance(address);
-            const network = await provider.getNetwork();
-
-            console.log("✅ Wallet connected — " + address);
-            console.log("- Balance: " + ethers.formatEther(balance) + " ETH");
-            console.log("- Network: " + network.name + " (Chain ID: " + network.chainId + ")");
         }
 
         // Get public keys
         let preQuantumPubKey, pqPublicKey;
 
+        console.log("Deriving keys…");
         if (mode === 'ledger') {
             const ecdsaPubkey = await getEcdsaPublicKey(transport, "m/44'/60'/0'/0/0");
             const raw = ecdsaPubkey.subarray(2, 66);
             const hash = ethers.keccak256(raw);
             preQuantumPubKey = ethers.getAddress('0x' + hash.slice(-40));
-            console.log("✅ ECDSA address: " + preQuantumPubKey);
 
-            await deriveMldsaSeed(transport, "m/44'/60'/0'/0/0");
+            const mldsaSeed = await deriveMldsaSeed(transport, "m/44'/60'/0'/0/0");
+            console.log("Ledger PQ seed: " + Array.from(mldsaSeed).map(b => b.toString(16).padStart(2, '0')).join(''));
             pqPublicKey = await getMldsaPublicKey(transport);
-            console.log("✅ ML-DSA public key retrieved (" + pqPublicKey.length + " bytes)");
+            console.log("Ledger PQ pubkey (first 32): " + Array.from(pqPublicKey.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(''));
         } else {
-            const preQuantumSeed = document.getElementById('prequantum').value.trim();
-            const postQuantumSeed = document.getElementById('postquantum').value.trim();
-
-            try {
-                validateSeed(preQuantumSeed, "Pre-quantum seed");
-                validateSeed(postQuantumSeed, "Post-quantum seed");
-            } catch (error) {
-                console.error("Invalid seed: " + error.message);
+            const mnemonic = document.getElementById('mnemonic').value.trim();
+            if (!mnemonic) {
+                console.error("Please enter a BIP-39 mnemonic phrase.");
                 return;
             }
+
+            const { preQuantumSeed, postQuantumSeed } = deriveSeeds(mnemonic, pqAlgo);
+            console.log("Software PQ seed: " + postQuantumSeed);
 
             preQuantumPubKey = await softEcdsaKeygen.getAddress({ privateKey: preQuantumSeed });
 
@@ -157,7 +133,10 @@ async function main(mode) {
             } else {
                 pqPublicKey = await softMldsaKeygen.getPublicKey({ postQuantumSeed });
             }
+            console.log("Software PQ pubkey (first 32): " + Array.from(pqPublicKey.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(''));
         }
+
+        console.log("ECDSA address: " + preQuantumPubKey);
 
         // Encode keys for the contract
         const postQuantumPubKey = pqAlgo === 'falcon'
@@ -165,18 +144,17 @@ async function main(mode) {
             : to_expanded_encoded_bytes(pqPublicKey);
 
         // Deploy
-        console.log("📦 Deploying ERC-4337 account (" + accountMode + ")...");
+        console.log("Deploying account…");
         const result = await deployERC4337Account(
             factoryAddress, preQuantumPubKey, postQuantumPubKey, signer
         );
 
         if (result.success) {
-            console.log("============================================================");
-            console.log("🎉 DEPLOYMENT COMPLETE!");
-            console.log("🔑 Account: " + result.address);
-            if (result.transactionHash) console.log("🔍 Tx: " + result.transactionHash);
-            if (result.alreadyExists) console.log("ℹ️  Account already existed at this address");
-            console.log("============================================================");
+            if (result.alreadyExists) {
+                console.log("Account already exists: " + result.address);
+            } else {
+                console.log("Account created: " + result.address);
+            }
         } else {
             console.error("Deployment failed" + (result.error ? ": " + result.error : ""));
         }
@@ -199,12 +177,7 @@ function setup() {
 
     redirectConsole(output);
 
-    // Initial status
-    if (typeof window !== 'undefined' && window.ethereum) {
-        output.textContent = '✅ Wallet detected. Configure seeds above and click deploy.\n';
-    } else {
-        output.textContent = '⚠️ No browser wallet detected. Use Ledger mode or install MetaMask/Rabby.\n';
-    }
+    console.log('Ready.');
 
     // Disable Ledger button when Falcon is selected
     const accountModeSelect = document.getElementById('accountMode');
@@ -219,7 +192,7 @@ function setup() {
     async function run(mode) {
         const btn = mode === 'ledger' ? deployLedgerBtn : deployBtn;
         if (btn) btn.disabled = true;
-        output.textContent = '';
+        output.innerHTML = '';
 
         try {
             await main(mode);
@@ -271,22 +244,18 @@ export async function deployERC4337Account(
             if (provider.getSigner) {
                 signer = provider.getSigner();
             }
-            console.log("🔌 Connected via RPC URL:", signerOrProvider);
 
         } else if (signerOrProvider.signTransaction) {
             signer = signerOrProvider;
             provider = signer.provider;
 
         } else if (signerOrProvider.request) {
-            console.log("🔌 Connecting to browser wallet...");
             provider = new ethers.BrowserProvider(signerOrProvider);
             signer = await provider.getSigner();
-            console.log("✅ Wallet connected");
 
         } else if (signerOrProvider.getNetwork) {
             provider = signerOrProvider;
             signer = await provider.getSigner();
-            console.log("🔌 Using provided Provider");
 
         } else {
             throw new Error(
@@ -294,7 +263,6 @@ export async function deployERC4337Account(
             );
         }
 
-        const address = await signer.getAddress();
         const network = await provider.getNetwork();
 
         const factoryCode = await provider.getCode(factoryAddress);
@@ -312,7 +280,6 @@ export async function deployERC4337Account(
                 postQuantumPubKey
             );
         } catch (error) {
-            console.error("Failed to calculate address: " + error.message);
             throw new Error("Cannot calculate account address: " + error.message);
         }
 
@@ -322,7 +289,6 @@ export async function deployERC4337Account(
 
         const code = await provider.getCode(expectedAddress);
         if (code !== '0x') {
-            console.log("✅ Account already exists at: " + expectedAddress);
             return {
                 success: true,
                 address: expectedAddress,
@@ -330,18 +296,14 @@ export async function deployERC4337Account(
             };
         }
 
-        console.log("⛽ Estimating gas...");
         let estimatedGas;
         try {
             estimatedGas = await factory.createAccount.estimateGas(
                 preQuantumPubKey,
                 postQuantumPubKey
             );
-            console.log("- Estimated gas: " + estimatedGas.toString());
         } catch (error) {
-            console.warn("Gas estimation failed: " + error.message);
             estimatedGas = 5000000n;
-            console.log("- Using default gas limit: " + estimatedGas.toString());
         }
         const feeData = await provider.getFeeData();
 
@@ -363,11 +325,7 @@ export async function deployERC4337Account(
                 : maxPriority * 2n;
         }
 
-        const gasCostWei = estimatedGas * maxFee;
-        console.log("- Max fee: " + ethers.formatUnits(maxFee, "gwei") + " gwei");
-        console.log("- Max priority fee: " + ethers.formatUnits(maxPriority, "gwei") + " gwei");
-        console.log("- Estimated cost (upper bound): " + ethers.formatEther(gasCostWei) + " ETH");
-        console.log("🚀 Creating account — please confirm the transaction...");
+        console.log("Confirm the transaction in your wallet…");
 
         const tx = await factory.createAccount(
             preQuantumPubKey,
@@ -379,12 +337,7 @@ export async function deployERC4337Account(
             }
         );
         const txHash = tx.hash;
-        console.log("✅ Transaction signed: " + txHash);
-
-        const url = explorerTxUrl(network.chainId, txHash);
-        if (url) console.log("- Explorer: " + url);
-
-        console.log("- Waiting for confirmation...");
+        console.log("Mining… " + txHash);
 
         let receipt = null;
         let attempts = 0;
@@ -395,8 +348,6 @@ export async function deployERC4337Account(
                 receipt = await provider.getTransactionReceipt(txHash);
                 if (!receipt) {
                     attempts++;
-                    const elapsed = attempts * 5;
-                    console.log("  ⏳ Waiting... " + elapsed + "s elapsed");
                     await new Promise(resolve => setTimeout(resolve, 5000));
                 }
             } catch (error) {
@@ -406,8 +357,7 @@ export async function deployERC4337Account(
         }
 
         if (!receipt) {
-            console.log("⚠️  Transaction is taking longer than expected");
-            console.log("Check status at: " + (url || txHash));
+            console.log("Transaction pending — check explorer for " + txHash);
             return {
                 success: false,
                 pending: true,
@@ -417,7 +367,6 @@ export async function deployERC4337Account(
         }
 
         if (receipt.status === 0) {
-            console.log("❌ Transaction failed (reverted)");
             return {
                 success: false,
                 error: "Transaction reverted",
@@ -425,28 +374,15 @@ export async function deployERC4337Account(
             };
         }
 
-        console.log("✅ ERC4337 Account created successfully!");
-        console.log("- Account address: " + expectedAddress);
-        console.log("- Block number: " + receipt.blockNumber);
-        console.log("- Gas used: " + receipt.gasUsed.toString());
-
-        const actualCost = receipt.gasUsed * (receipt.gasPrice || receipt.effectiveGasPrice || 0n);
-        console.log("- Actual cost: " + ethers.formatEther(actualCost) + " ETH");
-
         return {
             success: true,
             address: expectedAddress,
             transactionHash: txHash,
             blockNumber: receipt.blockNumber,
             gasUsed: receipt.gasUsed.toString(),
-            actualCost: ethers.formatEther(actualCost)
         };
 
     } catch (error) {
-        console.error("Account creation failed: " + error.message);
-        if (error.code === 'ACTION_REJECTED' || error.code === 4001) {
-            console.log("(User rejected the transaction in wallet)");
-        }
         return {
             success: false,
             error: error.message

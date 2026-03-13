@@ -7,31 +7,32 @@
     <link rel="stylesheet" href="shared.css">
 </head>
 <body>
-    <nav>
-        <a href="create-account.html">Create Account</a>
-        <a href="send-tx.html" class="active">Send Transaction</a>
-    </nav>
+    <div class="top-bar">
+        <nav>
+            <a href="create-account.html">Create Account</a>
+            <a href="send-tx.html" class="active">Send Transaction</a>
+        </nav>
+        <div class="bar-config">
+            <label>Pimlico</label>
+            <input type="text" id="pimlicoApiKey" value="pim_i3rJWDhHAhvqmPgaA3DsUo">
+            <label>Network</label>
+            <select id="targetNetwork">
+                <option value="sepolia" data-chain="11155111" selected>Sepolia</option>
+                <option value="arbitrumSepolia" data-chain="421614">Arbitrum Sepolia</option>
+                <option value="baseSepolia" data-chain="84532">Base Sepolia</option>
+            </select>
+            <label>Mode</label>
+            <select id="pqAlgo">
+                <option value="mldsa">ML-DSA-44 + K1</option>
+                <option value="falcon">Falcon-512 + K1</option>
+            </select>
+        </div>
+    </div>
+
+    <input type="hidden" id="rpcUrl" value="https://eth-sepolia-testnet.api.pocket.network">
 
     <div class="config-section">
         <h2>Transaction Details</h2>
-
-        <div class="twocols">
-            <!-- Network + RPC: always visible for both modes -->
-            <div class="input-group">
-                <label for="targetNetwork">Target Network</label>
-                <select id="targetNetwork">
-                    <option value="sepolia" data-chain="11155111">Sepolia</option>
-                    <option value="arbitrumSepolia" data-chain="421614" selected>Arbitrum Sepolia</option>
-                    <option value="baseSepolia" data-chain="84532">Base Sepolia</option>
-                </select>
-                <input type="hidden" id="rpcUrl" value="https://sepolia-rollup.arbitrum.io/rpc">
-            </div>
-
-            <div class="input-group">
-                <label>Pimlico API Key</label>
-                <input type="text" id="pimlicoApiKey" value="">
-            </div>
-        </div>
 
         <div class="twocols">
             <div class="input-group">
@@ -56,55 +57,38 @@
                 <small>Leave as 0x for simple ETH transfer</small>
             </div>
         </div>
+    </div>
 
-        <!-- ─── PQ Algorithm selector ─── -->
-        <div class="input-group">
-            <label for="pqAlgo">Post-Quantum Algorithm</label>
-            <select id="pqAlgo">
-                <option value="mldsa">ML-DSA-44</option>
-                <option value="falcon">Falcon-512 (software only)</option>
-            </select>
-            <small>Must match the algorithm used when the account was created</small>
+    <div class="config-section">
+        <h2>Signing Keys</h2>
+
+        <div class="mode-toggle">
+            <button id="mode-soft" class="active">Software</button>
+            <button id="mode-ledger">Ledger Hardware</button>
         </div>
 
-        <label style="font-weight: 600; color: #334155; font-size: 13px; margin-bottom: 10px; display: block;">
-            Signing Mode
-        </label>
-        <div class="signing-mode-toggle">
-            <input type="radio" name="signingMode" id="modeSoft" value="soft" checked>
-            <label for="modeSoft">Software</label>
-            <input type="radio" name="signingMode" id="modeLedger" value="ledger">
-            <label for="modeLedger">Ledger Hardware</label>
-        </div>
-
-        <!-- ─── Software mode: both seeds ─── -->
-        <div id="softSeedGroup">
-            <div class="twocols">
-                <div class="input-group">
-                    <label>Pre-Quantum Seed (ECDSA)</label>
-                    <input type="text" id="preQuantumSeed" value="0x1b48e04041e23c72cacdaa9b0775d31515fc74d6a6d3c8804172f7e7d1248529">
-                    <small>Same seed used to create the account</small>
-                </div>
-                <div class="input-group">
-                    <label id="pqSeedLabel">Post-Quantum Seed (ML-DSA)</label>
-                    <input type="text" id="postQuantumSeed" value="0xac38da90e1a47bd048580b74e07ce649649642f1a9696b714977bf9f2942c1a4">
-                    <small>Same seed used to create the account</small>
-                </div>
+        <!-- Software panel -->
+        <div id="panel-soft" class="mode-panel active">
+            <div class="input-group">
+                <label for="mnemonic">Mnemonic Phrase</label>
+                <input type="text" id="mnemonic" placeholder="enter your 12 or 24 word mnemonic phrase">
+                <small>Same mnemonic used to create the account &mdash; keys derived via PQ-SLIP</small>
+            </div>
+            <div class="button-container">
+                <button id="sendTx">Create & Sign UserOperation</button>
             </div>
         </div>
 
-        <!-- ─── Ledger mode: info banner ─── -->
-        <div id="ledgerInfoGroup" style="display: none;">
+        <!-- Ledger panel -->
+        <div id="panel-ledger" class="mode-panel">
             <div class="ledger-info">
                 Both ECDSA and ML-DSA keys are derived on the Ledger secure element
                 via BIP32 path <code>m/44'/60'/0'/0/0</code>. No keys leave the device.
             </div>
+            <div class="button-container">
+                <button id="sendTxLedger">Create & Sign UserOperation</button>
+            </div>
         </div>
-
-    </div>
-
-    <div class="button-container">
-        <button id="sendTx">Create & Sign UserOperation</button>
     </div>
 
     <div id="output"></div>
@@ -124,79 +108,72 @@
             '0x14a34':  'baseSepolia',
         };
 
-        // Dropdown change → update RPC URL
         const sel = document.getElementById('targetNetwork');
-        if (sel) {
-            sel.addEventListener('change', () => {
-                const rpcInput = document.getElementById('rpcUrl');
-                const key = sel.value;
-                if (rpcDefaults[key] && rpcInput) rpcInput.value = rpcDefaults[key];
-            });
-        }
+        const rpcInput = document.getElementById('rpcUrl');
 
-        // ── PQ algorithm change → update labels + disable Ledger if Falcon ──
+        // Dropdown change → update RPC URL
+        sel.addEventListener('change', () => {
+            const key = sel.value;
+            if (rpcDefaults[key]) rpcInput.value = rpcDefaults[key];
+        });
+
+        // ── PQ algorithm change → disable Ledger if Falcon ──
         const pqAlgoSelect = document.getElementById('pqAlgo');
-        const pqSeedLabel  = document.getElementById('pqSeedLabel');
-        const ledgerRadio  = document.getElementById('modeLedger');
-        const softRadio    = document.getElementById('modeSoft');
+        const modeSoft   = document.getElementById('mode-soft');
+        const modeLedger = document.getElementById('mode-ledger');
 
         if (pqAlgoSelect) {
             pqAlgoSelect.addEventListener('change', () => {
                 const isFalcon = pqAlgoSelect.value === 'falcon';
-
-                // Update seed label
-                if (pqSeedLabel) {
-                    pqSeedLabel.textContent = isFalcon
-                        ? 'Post-Quantum Seed (Falcon-512):'
-                        : 'Post-Quantum Seed (ML-DSA):';
-                }
-
-                // Disable/enable Ledger radio
-                if (ledgerRadio) {
-                    ledgerRadio.disabled = isFalcon;
-                    if (isFalcon && ledgerRadio.checked) {
-                        softRadio.checked = true;
-                        softRadio.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
+                modeLedger.disabled = isFalcon;
+                if (isFalcon && modeLedger.classList.contains('active')) {
+                    modeSoft.click();
                 }
             });
         }
 
-        // Wallet auto-sync (Software mode only)
-        function syncFromWallet(chainIdHex) {
-            const mode = document.querySelector('input[name="signingMode"]:checked');
-            if (mode && mode.value !== 'soft') return;
+        // ── Mode toggle ──
+        modeSoft.addEventListener('click', () => {
+            modeSoft.classList.add('active');
+            modeLedger.classList.remove('active');
+            document.getElementById('panel-soft').classList.add('active');
+            document.getElementById('panel-ledger').classList.remove('active');
+            walletSync();
+        });
 
-            const key = chainToNetwork[chainIdHex.toLowerCase()];
-            if (!key) return;
+        modeLedger.addEventListener('click', () => {
+            if (modeLedger.disabled) return;
+            modeLedger.classList.add('active');
+            modeSoft.classList.remove('active');
+            document.getElementById('panel-ledger').classList.add('active');
+            document.getElementById('panel-soft').classList.remove('active');
+        });
 
-            const rpcInput = document.getElementById('rpcUrl');
-            if (sel) sel.value = key;
-            if (rpcInput && rpcDefaults[key]) rpcInput.value = rpcDefaults[key];
+        // ── Wallet auto-sync (Software mode only) ──
+        function isSoftMode() {
+            return modeSoft.classList.contains('active');
         }
 
-        async function initWalletSync() {
-            if (!window.ethereum) return;
+        function syncFromWallet(chainIdHex) {
+            if (!isSoftMode()) return;
+            const key = chainToNetwork[chainIdHex.toLowerCase()];
+            if (!key) return;
+            sel.value = key;
+            if (rpcDefaults[key]) rpcInput.value = rpcDefaults[key];
+        }
+
+        async function walletSync() {
+            if (!window.ethereum || !isSoftMode()) return;
             try {
                 const chainId = await window.ethereum.request({ method: 'eth_chainId' });
                 syncFromWallet(chainId);
             } catch (e) {}
-            window.ethereum.on('chainChanged', syncFromWallet);
         }
 
-        // Re-sync when switching back to Software mode
-        document.querySelectorAll('input[name="signingMode"]').forEach(radio => {
-            radio.addEventListener('change', async () => {
-                if (radio.value === 'soft' && radio.checked && window.ethereum) {
-                    try {
-                        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                        syncFromWallet(chainId);
-                    } catch (e) {}
-                }
-            });
-        });
-
-        initWalletSync();
+        if (window.ethereum) {
+            walletSync();
+            window.ethereum.on('chainChanged', syncFromWallet);
+        }
     })();
     </script>
 

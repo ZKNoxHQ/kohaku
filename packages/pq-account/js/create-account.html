@@ -7,72 +7,61 @@
     <link rel="stylesheet" href="shared.css">
 </head>
 <body>
-    <nav>
-        <a href="create-account.html" class="active">Create Account</a>
-        <a href="send-tx.html">Send Transaction</a>
-    </nav>
+    <div class="top-bar">
+        <nav>
+            <a href="create-account.html" class="active">Create Account</a>
+            <a href="send-tx.html">Send Transaction</a>
+        </nav>
+        <div class="bar-config">
+            <label>Network</label>
+            <select id="targetNetwork">
+                <option value="sepolia" selected>Sepolia</option>
+                <option value="arbitrumSepolia">Arbitrum Sepolia</option>
+                <option value="baseSepolia">Base Sepolia</option>
+            </select>
+            <label>Mode</label>
+            <select id="accountMode">
+                <option value="mldsa_k1">ML-DSA-44 + K1</option>
+                <option value="falcon_k1">Falcon-512 + K1</option>
+            </select>
+        </div>
+    </div>
 
-    <div class="warning">
+    <input type="hidden" id="rpcUrl" value="https://eth-sepolia-testnet.api.pocket.network">
+    <span id="factory" style="display:none;">&mdash;</span>
+
+    <div id="falconNotice" class="falcon-info">
+        Falcon-512 uses a WASM-compiled signer and is available in software mode only.
+        Ledger support is not available for Falcon.
+    </div>
+
+    <!-- Load deployments and wire up factory address -->
+    <script type="module">
+    import deployments from './deployments/deployments.json' assert { type: 'json' };
+
+    window.__deployments = deployments;
+
+    function updateFactory(networkKey, accountMode) {
+        const factorySpan = document.getElementById('factory');
+        accountMode = accountMode || document.getElementById('accountMode')?.value || 'mldsa_k1';
+        if (networkKey && deployments[networkKey] && deployments[networkKey].accounts[accountMode]) {
+            factorySpan.textContent = deployments[networkKey].accounts[accountMode].address;
+        } else {
+            factorySpan.textContent = '\u2014';
+        }
+    }
+
+    window.__updateFactory = updateFactory;
+
+    // Set factory for default selection
+    updateFactory(document.getElementById('targetNetwork').value);
+    </script>
+
+    <!-- <div class="warning">
         <strong>Security Note</strong>
         These seeds will generate your account's public keys. Do not use real seeds in production on a public website.
         This is for testing purposes only.
-    </div>
-
-    <div class="config-section">
-        <h2>Configuration</h2>
-
-        <!-- Unified network selector for both modes -->
-        <div class="input-group">
-            <label for="targetNetwork">Target Network</label>
-            <select id="targetNetwork">
-                <option value="sepolia">Sepolia</option>
-                <option value="arbitrumSepolia" selected>Arbitrum Sepolia</option>
-                <option value="baseSepolia">Base Sepolia</option>
-            </select>
-            <input type="hidden" id="rpcUrl" value="https://sepolia-rollup.arbitrum.io/rpc">
-        </div>
-
-        <div class="input-group" style="display:none;">
-            <label for="factory">Factory Contract Address:</label>
-            <span id="factory">&mdash;</span>
-        </div>
-
-        <!-- Load deployments and wire up factory address -->
-        <script type="module">
-        import deployments from './deployments/deployments.json' assert { type: 'json' };
-
-        window.__deployments = deployments;
-
-        function updateFactory(networkKey, accountMode) {
-            const factorySpan = document.getElementById('factory');
-            accountMode = accountMode || document.getElementById('accountMode')?.value || 'mldsa_k1';
-            if (networkKey && deployments[networkKey] && deployments[networkKey].accounts[accountMode]) {
-                factorySpan.textContent = deployments[networkKey].accounts[accountMode].address;
-            } else {
-                factorySpan.textContent = '\u2014';
-            }
-        }
-
-        window.__updateFactory = updateFactory;
-
-        // Set factory for default selection
-        updateFactory(document.getElementById('targetNetwork').value);
-        </script>
-
-        <div class="input-group">
-            <label for="accountMode">Account Mode</label>
-            <select id="accountMode">
-                <option value="mldsa_k1">ML-DSA-44 + ECDSA-K1</option>
-                <option value="falcon_k1">Falcon-512 + ECDSA-K1 (software only)</option>
-            </select>
-            <small>Choose the account type / key scheme</small>
-        </div>
-
-        <div id="falconNotice" class="falcon-info">
-            Falcon-512 uses a WASM-compiled signer and is available in software mode only.
-            Ledger support is not available for Falcon.
-        </div>
-    </div>
+    </div> -->
 
     <div class="config-section">
         <h2>Signing Keys</h2>
@@ -84,18 +73,10 @@
 
         <!-- Hot Wallet panel -->
         <div id="panel-hot" class="mode-panel active">
-            <div class="twocols">
-                <div class="input-group">
-                    <label for="prequantum">Pre-Quantum Seed</label>
-                    <input type="text" id="prequantum" value="0x1b48e04041e23c72cacdaa9b0775d31515fc74d6a6d3c8804172f7e7d1248529">
-                    <small>32 bytes (64 hex characters) for ECDSA key generation</small>
-                </div>
-
-                <div class="input-group">
-                    <label for="postquantum">Post-Quantum Seed</label>
-                    <input type="text" id="postquantum" value="0xac38da90e1a47bd048580b74e07ce649649642f1a9696b714977bf9f2942c1a4">
-                    <small id="pqSeedHint">32 bytes (64 hex characters) for ML-DSA-44 key generation</small>
-                </div>
+            <div class="input-group">
+                <label for="mnemonic">Mnemonic Phrase</label>
+                <input type="text" id="mnemonic" placeholder="enter your 12 or 24 word mnemonic phrase">
+                <small>ECDSA and <span id="pqAlgoName">ML-DSA-44</span> keys are derived via PQ-SLIP (BIP-39 + HMAC-SHA512)</small>
             </div>
             <div class="button-container">
                 <button id="deploy">Connect Wallet & Deploy Account</button>
@@ -137,7 +118,7 @@
         const rpcInput = document.getElementById('rpcUrl');
         const accountModeSelect = document.getElementById('accountMode');
         const falconNotice = document.getElementById('falconNotice');
-        const pqSeedHint = document.getElementById('pqSeedHint');
+        const pqAlgoName = document.getElementById('pqAlgoName');
 
         // Dropdown change → update RPC URL + factory
         sel.addEventListener('change', () => {
@@ -153,9 +134,7 @@
 
             const isFalcon = accountModeSelect.value.startsWith('falcon');
             falconNotice.style.display = isFalcon ? 'block' : 'none';
-            pqSeedHint.textContent = isFalcon
-                ? '32 bytes (64 hex characters) for Falcon-512 key generation'
-                : '32 bytes (64 hex characters) for ML-DSA-44 key generation';
+            if (pqAlgoName) pqAlgoName.textContent = isFalcon ? 'Falcon-512' : 'ML-DSA-44';
 
             // Disable/enable Ledger button
             modeLedger.disabled = isFalcon;

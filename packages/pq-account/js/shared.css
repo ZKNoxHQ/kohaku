@@ -11,10 +11,11 @@ body {
     line-height: 1.5;
 }
 
-/* ── Navigation ── */
-nav {
+/* ── Top Bar (nav + config) ── */
+.top-bar {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 6px;
     margin-bottom: 28px;
     background: #fff;
     padding: 6px;
@@ -22,7 +23,12 @@ nav {
     border: 1px solid #e2e5ea;
 }
 
-nav a {
+.top-bar nav {
+    display: flex;
+    gap: 4px;
+}
+
+.top-bar nav a {
     text-decoration: none;
     padding: 10px 20px;
     border-radius: 8px;
@@ -30,16 +36,69 @@ nav a {
     font-weight: 600;
     font-size: 14px;
     transition: all 0.15s ease;
+    white-space: nowrap;
 }
 
-nav a:hover {
+.top-bar nav a:hover {
     background: #f1f5f9;
     color: #334155;
 }
 
-nav a.active {
+.top-bar nav a.active {
     background: #0f172a;
     color: #fff;
+}
+
+.top-bar .bar-config {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    padding: 0 8px;
+}
+
+.top-bar .bar-config label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.top-bar .bar-config select {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1.5px solid #e2e5ea;
+    border-radius: 6px;
+    background: #f8f9fb;
+    color: #334155;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.top-bar .bar-config select:focus,
+.top-bar .bar-config input:focus {
+    outline: none;
+    border-color: #6366f1;
+}
+
+.top-bar .bar-config input {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1.5px solid #e2e5ea;
+    border-radius: 6px;
+    background: #f8f9fb;
+    color: #334155;
+    width: 140px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+@media (max-width: 720px) {
+    .top-bar { flex-wrap: wrap; }
+    .top-bar .bar-config { margin-left: 0; width: 100%; padding-top: 4px; }
 }
 
 /* ── Cards ── */
@@ -57,6 +116,46 @@ nav a.active {
     font-size: 16px;
     font-weight: 700;
     letter-spacing: -0.01em;
+}
+
+/* ── Collapsible config ── */
+details.config-section {
+    padding: 0;
+}
+
+details.config-section summary {
+    padding: 18px 28px;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+details.config-section summary::-webkit-details-marker { display: none; }
+
+details.config-section summary::before {
+    content: '\25B6';
+    font-size: 10px;
+    color: #94a3b8;
+    transition: transform 0.15s ease;
+}
+
+details.config-section[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details.config-section summary h2 {
+    margin: 0;
+    display: inline;
+}
+
+details.config-section > :not(summary) {
+    padding: 0 28px;
+}
+
+details.config-section > :last-child {
+    padding-bottom: 28px;
 }
 
 /* ── Form Fields ── */
@@ -283,24 +382,27 @@ button:disabled {
     display: none;
 }
 
-/* ── Output console ── */
+/* ── Output status line ── */
 #output {
-    background: #0f172a;
-    color: #e2e8f0;
-    padding: 24px;
-    border-radius: 14px;
     margin-top: 16px;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-    font-size: 13px;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    min-height: calc(100vh - 520px);
-    max-height: none;
-    overflow-y: visible;
-    border: 1px solid #1e293b;
 }
 
 #output:empty {
-    min-height: 60px;
+    display: none;
+}
+
+.status-line {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px 16px;
+    border-radius: 10px;
+    word-break: break-all;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.status-line.error {
+    background: #fef2f2;
+    color: #991b1b;
 }
