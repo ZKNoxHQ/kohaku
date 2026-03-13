@@ -140,6 +140,29 @@
         .derpath-row { display: flex; align-items: center; gap: 6px; margin-bottom: 1rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--text-muted); }
         .derpath-row input { width: 64px; margin: 0; padding: 4px 8px; font-size: 0.8rem; }
 
+        /* Transport toggle — must override global button styles */
+        .transport-toggle { display: inline-flex !important; gap: 0; border-radius: 8px; overflow: hidden; border: 1.5px solid var(--border-color); margin-bottom: 1rem; }
+        .transport-toggle button,
+        .transport-toggle button:hover,
+        .transport-toggle button:active,
+        .transport-toggle button:hover:not(:disabled) {
+            display: inline-flex !important; align-items: center; gap: 5px;
+            padding: 5px 12px !important; font-size: 0.75rem !important;
+            font-weight: 600; border: none; border-radius: 0 !important;
+            box-shadow: none !important; background: var(--bg-secondary) !important;
+            color: var(--text-muted) !important; cursor: pointer;
+            transition: all 0.15s; width: auto !important; transform: none !important;
+        }
+        .transport-toggle button + button { border-left: 1.5px solid var(--border-color); }
+        .transport-toggle button:hover,
+        .transport-toggle button:hover:not(:disabled) { background: var(--bg-tertiary) !important; }
+        .transport-toggle button.active,
+        .transport-toggle button.active:hover,
+        .transport-toggle button.active:hover:not(:disabled) { background: var(--accent-primary) !important; color: #fff !important; }
+        .transport-toggle button.active:hover,
+        .transport-toggle button.active:hover:not(:disabled) { background: #6d28d9 !important; }
+        .transport-toggle button svg { width: 14px; height: 14px; fill: currentColor; flex-shrink: 0; pointer-events: none; }
+
         @media (max-width: 768px) {
             .hero-container { flex-direction: column; text-align: center; }
             .hero-image { flex: 0 0 auto; max-width: 180px; }
@@ -252,6 +275,11 @@
                         <input id="bipIndex" type="number" min="0" value="0">
                     </div>
 
+                    <div class="transport-toggle">
+                        <button type="button" class="active" data-transport="usb"><svg viewBox="0 0 24 24"><path d="M15 7v2h-2V7h-2l3-4 3 4h-2zm-3 6.5L8.5 17H11v4h2v-4h2.5L12 13.5zm3.5-2H18l-4-3v2.5l1.5 1.5zM6 13.5l4 3V14l-1.5-1.5H6zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg> USB</button>
+                        <button type="button" data-transport="ble"><svg viewBox="0 0 24 24"><path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg> BLE</button>
+                    </div>
+
                     <button class="btn-create" id="btnCreate">Get Account</button>
                     <div class="balance-row" id="balanceCreateRow" style="display:none"></div>
                     <div class="status" id="statusCreate"></div>
@@ -291,7 +319,7 @@ import { ethers } from 'ethers';
 import { to_expanded_encoded_bytes } from './utils_mldsa.js';
 import {
     openTransport, deriveMldsaSeed, getMldsaPublicKey, getEcdsaPublicKey,
-    signHybridUserOp
+    signHybridUserOp, setTransportMode
 } from './hardware-signer/ledgerTransport.js';
 import { LedgerEthSigner } from './LedgerEthSigner.js';
 import * as hwMldsa from './hardware-signer/mldsaSigner.js';
@@ -309,6 +337,14 @@ function setStatus(el, msg, cls = '') { el.textContent = msg; el.className = 'st
 
 const BIP_BASE = "m/44'/60'/0'/0/";
 const getBipPath = () => BIP_BASE + (parseInt($('bipIndex').value) || 0);
+
+document.querySelectorAll('.transport-toggle button').forEach(btn =>
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.transport-toggle button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setTransportMode(btn.dataset.transport);
+    })
+);
 
 
 const d = deployments?.default ?? deployments;

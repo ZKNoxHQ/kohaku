@@ -16,6 +16,11 @@
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import { ethers } from 'ethers';
 
+let _transportMode = 'usb';   // 'usb' | 'ble'
+
+export function setTransportMode(mode) { _transportMode = mode; }
+export function getTransportMode()     { return _transportMode; }
+
 const CLA = 0xe0;
 
 const INS = {
@@ -109,8 +114,21 @@ function parseEcdsaResponse(resp) {
 
 // ─── Public API ─────────────────────────────────────────────────────────
 
-export async function openTransport() {
+export async function openTransport(mode) {
+    const m = mode || _transportMode;
+    if (m === 'ble') {
+        const { default: TransportWebBLE } = await import("@ledgerhq/hw-transport-web-ble");
+        return TransportWebBLE.create();
+    }
     return TransportWebHID.create();
+}
+
+/**
+ * Open a Ledger transport via Bluetooth (Web BLE).
+ * Requires HTTPS and a Bluetooth-capable Ledger (Nano X, Stax, Flex).
+ */
+export async function openTransportBLE() {
+    return openTransport('ble');
 }
 
 /**

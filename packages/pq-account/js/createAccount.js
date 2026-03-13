@@ -10,6 +10,7 @@ import {
     deriveMldsaSeed,
     getMldsaPublicKey,
     getEcdsaPublicKey,
+    setTransportMode,
 } from './hardware-signer/ledgerTransport.js';
 import { LedgerEthSigner } from './LedgerEthSigner.js';
 
@@ -178,6 +179,22 @@ function setup() {
     redirectConsole(output);
 
     console.log('Ready.');
+
+    // ── USB / Bluetooth transport toggle ──
+    const transportUsb = document.getElementById('transport-usb');
+    const transportBle = document.getElementById('transport-ble');
+    if (transportUsb && transportBle) {
+        transportUsb.addEventListener('click', () => {
+            transportUsb.classList.add('active');
+            transportBle.classList.remove('active');
+            setTransportMode('usb');
+        });
+        transportBle.addEventListener('click', () => {
+            transportBle.classList.add('active');
+            transportUsb.classList.remove('active');
+            setTransportMode('ble');
+        });
+    }
 
     // Disable Ledger button when Falcon is selected
     const accountModeSelect = document.getElementById('accountMode');

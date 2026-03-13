@@ -8,11 +8,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "ethers": "^6.13.0",
-    "@noble/post-quantum": "^0.2.0",
-    "@noble/hashes": "^1.4.0",
+    "@ledgerhq/hw-transport-web-ble": "^6.32.0",
     "@ledgerhq/hw-transport-webhid": "^6.31.0",
-    "Buffer": "^0.0.0"
+    "@noble/hashes": "^1.4.0",
+    "@noble/post-quantum": "^0.2.0",
+    "Buffer": "^0.0.0",
+    "ethers": "^6.13.0"
   },
   "devDependencies": {
     "vite": "^5.4.0",

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { redirectConsole } from './utils.js';
 import { deriveSeeds } from './pqslip.js';
-import { signHybridUserOp } from './hardware-signer/ledgerTransport.js';
+import { signHybridUserOp, setTransportMode } from './hardware-signer/ledgerTransport.js';
 
 import {
     createBaseUserOperation,
@@ -155,6 +155,23 @@ function setup() {
     if (!output) { console.error('Missing UI elements'); return; }
 
     redirectConsole(output);
+
+    // ── USB / Bluetooth transport toggle ──
+    const transportUsb = document.getElementById('transport-usb');
+    const transportBle = document.getElementById('transport-ble');
+    if (transportUsb && transportBle) {
+        transportUsb.addEventListener('click', () => {
+            transportUsb.classList.add('active');
+            transportBle.classList.remove('active');
+            setTransportMode('usb');
+        });
+        transportBle.addEventListener('click', () => {
+            transportBle.classList.add('active');
+            transportUsb.classList.remove('active');
+            setTransportMode('ble');
+        });
+    }
+
     console.log('Ready.');
 
     async function run(mode) {
