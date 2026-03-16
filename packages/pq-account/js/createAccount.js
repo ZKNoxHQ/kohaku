@@ -13,7 +13,6 @@ import {
     setTransportMode,
 } from './hardware-signer/ledgerTransport.js';
 import { LedgerEthSigner } from './LedgerEthSigner.js';
-import { verifyAccountContract } from './verifyContract.js';
 import { getProvider, getChainHex, disconnectWC } from './walletProvider.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────
@@ -153,33 +152,6 @@ async function main(mode) {
                 console.log("Account created: " + result.address);
             }
 
-            // Verify on Etherscan if API key is provided
-            const etherscanApiKey = document.getElementById('etherscanApiKey')?.value.trim();
-            if (etherscanApiKey && result.address) {
-                if (!result.alreadyExists) {
-                    console.log("Waiting for Etherscan to index the contract…");
-                    await new Promise(r => setTimeout(r, 10000));
-                }
-                try {
-                    const selectedNetwork = document.getElementById('targetNetwork')?.value;
-                    const factory = new ethers.Contract(factoryAddress, ACCOUNT_FACTORY_ABI, provider);
-                    const verifyResult = await verifyAccountContract(
-                        result.address,
-                        selectedNetwork,
-                        etherscanApiKey,
-                        factory,
-                        preQuantumPubKey,
-                        postQuantumPubKey
-                    );
-                    if (verifyResult.success) {
-                        console.log(verifyResult.message);
-                    } else {
-                        console.error("Verification: " + verifyResult.message);
-                    }
-                } catch (verifyErr) {
-                    console.error("Verification error: " + verifyErr.message);
-                }
-            }
 
             // Show address as the final log so it's visible and copyable
             console.log("Account address: " + result.address);

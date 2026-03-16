@@ -15,14 +15,18 @@ function showWalletPopup() {
     overlay.id = 'wallet-popup-overlay';
     overlay.innerHTML = `
         <div id="wallet-popup">
-            <p>Open in wallet app</p>
-            <a class="wallet-btn" href="rabby://open?url=${encodeURIComponent(dappUrl)}">
-                Rabby
-            </a>
+            <p>Open this page in your wallet's browser</p>
+            <div class="wallet-url-box">
+                <input type="text" id="wallet-url" value="${dappUrl}" readonly>
+                <button id="wallet-copy-btn">Copy</button>
+            </div>
+            <small style="color:#888; display:block; margin:0.5rem 0 1rem;">
+                Copy the URL, open your wallet app, go to its DApp browser and paste it.
+            </small>
             <a class="wallet-btn" href="https://metamask.app.link/dapp/${dappUrl.replace(/^https?:\/\//, '')}">
-                MetaMask
+                Open in MetaMask
             </a>
-            <button class="wallet-close" id="wallet-popup-close">Cancel</button>
+            <button class="wallet-close" id="wallet-popup-close">Close</button>
         </div>
     `;
 
@@ -50,6 +54,19 @@ function showWalletPopup() {
             text-decoration: none; font-size: 0.95rem; font-weight: 500;
         }
         #wallet-popup .wallet-btn:active { background: #3d3d5c; }
+        .wallet-url-box {
+            display: flex; gap: 0.5rem; margin: 0.5rem 0;
+        }
+        .wallet-url-box input {
+            flex: 1; padding: 0.5rem; border-radius: 8px;
+            border: 1px solid #444; background: #111; color: #fff;
+            font-size: 0.8rem; min-width: 0;
+        }
+        .wallet-url-box button {
+            padding: 0.5rem 0.75rem; border-radius: 8px;
+            background: #4a4a6a; color: #fff; border: none;
+            font-size: 0.8rem; cursor: pointer; white-space: nowrap;
+        }
         #wallet-popup .wallet-close {
             margin-top: 0.75rem; background: none; border: none;
             color: #888; font-size: 0.85rem; cursor: pointer;
@@ -59,6 +76,12 @@ function showWalletPopup() {
     `;
     document.head.appendChild(style);
     document.body.appendChild(overlay);
+
+    document.getElementById('wallet-copy-btn').addEventListener('click', () => {
+        navigator.clipboard.writeText(dappUrl).then(() => {
+            document.getElementById('wallet-copy-btn').textContent = 'Copied!';
+        });
+    });
 
     document.getElementById('wallet-popup-close').addEventListener('click', () => {
         overlay.remove();
