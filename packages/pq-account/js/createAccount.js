@@ -13,6 +13,8 @@ import {
     setTransportMode,
 } from './hardware-signer/ledgerTransport.js';
 import { LedgerEthSigner } from './LedgerEthSigner.js';
+import { verifyAccountContract } from './verifyContract.js';
+import { getProvider, getChainHex, disconnectWC } from './walletProvider.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -71,35 +73,29 @@ async function main(mode) {
             signer = new LedgerEthSigner(transport, provider);
             await signer.getAddress();
         } else {
-            if (typeof window === 'undefined' || !window.ethereum) {
-                throw new Error(
-                    "No wallet detected. Install MetaMask or Rabby."
-                );
-            }
-
-            const networkToChainId = {
-                sepolia: '0xaa36a7',
-                arbitrumSepolia: '0x66eee', baseSepolia: '0x14a34',
-            };
             const selectedNetwork = document.getElementById('targetNetwork')?.value;
-            const expectedChainHex = networkToChainId[selectedNetwork];
+            const { provider: eipProvider, isWalletConnect } = await getProvider(selectedNetwork);
 
-            await window.ethereum.request({ method: 'eth_requestAccounts' });
+            const expectedChainHex = getChainHex(selectedNetwork);
 
-            const currentChain = await window.ethereum.request({ method: 'eth_chainId' });
-            if (expectedChainHex && currentChain.toLowerCase() !== expectedChainHex.toLowerCase()) {
-                try {
-                    await window.ethereum.request({
-                        method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: expectedChainHex }],
-                    });
-                } catch (_) {
-                    throw new Error("Please switch your wallet to " + selectedNetwork + ".");
+            await eipProvider.request({ method: 'eth_requestAccounts' });
+
+            if (!isWalletConnect) {
+                const currentChain = await eipProvider.request({ method: 'eth_chainId' });
+                if (expectedChainHex && currentChain.toLowerCase() !== expectedChainHex.toLowerCase()) {
+                    try {
+                        await eipProvider.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: expectedChainHex }],
+                        });
+                    } catch (_) {
+                        throw new Error("Please switch your wallet to " + selectedNetwork + ".");
+                    }
                 }
             }
 
             console.log("Connecting wallet…");
-            provider = new ethers.BrowserProvider(window.ethereum);
+            provider = new ethers.BrowserProvider(eipProvider);
             signer = await provider.getSigner();
         }
 
@@ -156,6 +152,37 @@ async function main(mode) {
             } else {
                 console.log("Account created: " + result.address);
             }
+
+            // Verify on Etherscan if API key is provided
+            const etherscanApiKey = document.getElementById('etherscanApiKey')?.value.trim();
+            if (etherscanApiKey && result.address) {
+                if (!result.alreadyExists) {
+                    console.log("Waiting for Etherscan to index the contract…");
+                    await new Promise(r => setTimeout(r, 10000));
+                }
+                try {
+                    const selectedNetwork = document.getElementById('targetNetwork')?.value;
+                    const factory = new ethers.Contract(factoryAddress, ACCOUNT_FACTORY_ABI, provider);
+                    const verifyResult = await verifyAccountContract(
+                        result.address,
+                        selectedNetwork,
+                        etherscanApiKey,
+                        factory,
+                        preQuantumPubKey,
+                        postQuantumPubKey
+                    );
+                    if (verifyResult.success) {
+                        console.log(verifyResult.message);
+                    } else {
+                        console.error("Verification: " + verifyResult.message);
+                    }
+                } catch (verifyErr) {
+                    console.error("Verification error: " + verifyErr.message);
+                }
+            }
+
+            // Show address as the final log so it's visible and copyable
+            console.log("Account address: " + result.address);
         } else {
             console.error("Deployment failed" + (result.error ? ": " + result.error : ""));
         }
@@ -164,6 +191,7 @@ async function main(mode) {
         if (transport) {
             try { await transport.close(); } catch (_) { }
         }
+        await disconnectWC();
     }
 }
 
@@ -238,10 +266,9 @@ if (document.readyState === 'loading') {
 const ACCOUNT_FACTORY_ABI = [
     "function createAccount(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external returns (address)",
     "function getAddress(bytes calldata preQuantumPubKey, bytes calldata postQuantumPubKey) external view returns (address payable)",
-    "function entryPoint() external view returns (address)",
-    "function preQuantumLogic() external view returns (address)",
-    "function postQuantumLogic() external view returns (address)",
-    "function hybridVerifierLogic() external view returns (address)"
+    "function ENTRY_POINT() external view returns (address)",
+    "function PRE_QUANTUM_LOGIC() external view returns (address)",
+    "function POST_QUANTUM_LOGIC() external view returns (address)"
 ];
 
 /**
