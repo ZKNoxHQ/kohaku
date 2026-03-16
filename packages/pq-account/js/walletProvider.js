@@ -9,8 +9,9 @@ const CHAIN_CONFIG = {
 };
 
 const WALLET_DEEPLINKS = {
-    rabby:    (uri) => `rabby://wc?uri=${encodeURIComponent(uri)}`,
-    metamask: (uri) => `metamask://wc?uri=${encodeURIComponent(uri)}`,
+    rabby:    (uri) => `https://rabby.io/wc?uri=${encodeURIComponent(uri)}`,
+    metamask: (uri) => `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`,
+    any:      (uri) => uri, // raw wc: URI — Android picks the default handler
 };
 
 let wcProvider = null;
@@ -30,6 +31,7 @@ function showWalletPicker(wcUri) {
         overlay.innerHTML = `
             <div id="wallet-popup">
                 <p>Connect your wallet</p>
+                <button class="wallet-btn" data-wallet="any">Open wallet (auto-detect)</button>
                 <button class="wallet-btn" data-wallet="rabby">Rabby</button>
                 <button class="wallet-btn" data-wallet="metamask">MetaMask</button>
                 <button class="wallet-close" id="wallet-popup-close">Cancel</button>
