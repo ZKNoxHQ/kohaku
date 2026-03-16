@@ -1,52 +1,84 @@
-import { createAppKit } from '@reown/appkit';
-import { EthersAdapter } from '@reown/appkit-adapter-ethers';
-
-const WALLETCONNECT_PROJECT_ID = '9df9bc4cfc1db06d40cc7bdad20e199f';
-
 const CHAIN_CONFIG = {
-    sepolia:         { id: 11155111, hex: '0xaa36a7', name: 'Sepolia',          rpc: 'https://eth-sepolia-testnet.api.pocket.network' },
-    arbitrumSepolia: { id: 421614,   hex: '0x66eee',  name: 'Arbitrum Sepolia', rpc: 'https://sepolia-rollup.arbitrum.io/rpc' },
-    baseSepolia:     { id: 84532,    hex: '0x14a34',  name: 'Base Sepolia',     rpc: 'https://sepolia.base.org' },
+    sepolia:         { id: 11155111, hex: '0xaa36a7', rpc: 'https://eth-sepolia-testnet.api.pocket.network' },
+    arbitrumSepolia: { id: 421614,   hex: '0x66eee',  rpc: 'https://sepolia-rollup.arbitrum.io/rpc' },
+    baseSepolia:     { id: 84532,    hex: '0x14a34',  rpc: 'https://sepolia.base.org' },
 };
 
-// Build Reown-compatible chain definitions
-const appKitNetworks = Object.values(CHAIN_CONFIG).map(c => ({
-    id: c.id,
-    name: c.name,
-    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-    rpcUrls: { default: { http: [c.rpc] } },
-    testnet: true,
-}));
+function isMobile() {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
 
-let modal = null;
+function showWalletPopup() {
+    // Strip protocol for deep links
+    const dappUrl = window.location.href.replace(/^https?:\/\//, '');
 
-function getModal() {
-    if (modal) return modal;
-    modal = createAppKit({
-        adapters: [new EthersAdapter()],
-        networks: appKitNetworks,
-        defaultNetwork: appKitNetworks[0],
-        projectId: WALLETCONNECT_PROJECT_ID,
-        metadata: {
-            name: 'ZKNOX PQ Account',
-            description: 'Post-Quantum ERC-4337 Account',
-            url: window.location.origin,
-            icons: [],
-        },
-        featuredWalletIds: [
-            '18388be9ac2d02726dbac9777c96efaac06d744b2f6d580fccdd4127a6d01fd1', // Rabby
-            'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
-        ],
+    const overlay = document.createElement('div');
+    overlay.id = 'wallet-popup-overlay';
+    overlay.innerHTML = `
+        <div id="wallet-popup">
+            <p>Open this page in your wallet app</p>
+            <a class="wallet-btn" href="https://metamask.app.link/dapp/${dappUrl}">
+                MetaMask
+            </a>
+            <a class="wallet-btn" href="rabby://open?url=${encodeURIComponent(window.location.href)}">
+                Rabby
+            </a>
+            <button class="wallet-close" id="wallet-popup-close">Cancel</button>
+        </div>
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        #wallet-popup-overlay {
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0.5);
+            display: flex; align-items: flex-end; justify-content: center;
+            animation: fadeIn .2s;
+        }
+        #wallet-popup {
+            background: #1a1a2e; color: #eee;
+            border-radius: 16px 16px 0 0;
+            padding: 1.5rem; width: 100%; max-width: 400px;
+            text-align: center;
+            animation: slideUp .25s ease-out;
+        }
+        #wallet-popup p {
+            margin: 0 0 1rem; font-size: 1rem; font-weight: 600;
+        }
+        #wallet-popup .wallet-btn {
+            display: block; padding: 0.85rem; margin: 0.5rem 0;
+            border-radius: 10px; background: #2d2d44; color: #fff;
+            text-decoration: none; font-size: 0.95rem; font-weight: 500;
+        }
+        #wallet-popup .wallet-btn:active { background: #3d3d5c; }
+        #wallet-popup .wallet-close {
+            margin-top: 0.75rem; background: none; border: none;
+            color: #888; font-size: 0.85rem; cursor: pointer;
+        }
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes slideUp { from { transform: translateY(100%) } to { transform: translateY(0) } }
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(overlay);
+
+    document.getElementById('wallet-popup-close').addEventListener('click', () => {
+        overlay.remove();
+        style.remove();
     });
-    return modal;
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+            style.remove();
+        }
+    });
 }
 
 /**
  * Returns an EIP-1193 provider.
- * Uses window.ethereum if available (browser extension), otherwise opens AppKit modal.
+ * Uses window.ethereum if available, otherwise shows wallet popup on mobile.
  */
 export async function getProvider(networkKey) {
-    // Browser extension available — use it directly
     if (window.ethereum) {
         return { provider: window.ethereum, isWalletConnect: false };
     }
@@ -54,36 +86,12 @@ export async function getProvider(networkKey) {
     const chain = CHAIN_CONFIG[networkKey];
     if (!chain) throw new Error('Unknown network: ' + networkKey);
 
-    console.log('No browser wallet found — opening wallet selector…');
-
-    const appKit = getModal();
-
-    // Switch to the correct network
-    const targetNetwork = appKitNetworks.find(n => n.id === chain.id);
-    if (targetNetwork) {
-        await appKit.switchNetwork(targetNetwork);
+    if (isMobile()) {
+        showWalletPopup();
+        throw new Error('Select a wallet to continue.');
     }
 
-    // Open modal and wait for connection
-    await appKit.open();
-
-    const walletProvider = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Wallet connection timed out'));
-        }, 120000);
-
-        const unsubscribe = appKit.subscribeProviders(state => {
-            const eip155 = state?.['eip155'];
-            if (eip155) {
-                clearTimeout(timeout);
-                unsubscribe?.();
-                resolve(eip155);
-            }
-        });
-    });
-
-    console.log('Wallet connected via AppKit.');
-    return { provider: walletProvider, isWalletConnect: true };
+    throw new Error('No wallet detected. Install MetaMask or Rabby.');
 }
 
 export function getChainHex(networkKey) {
@@ -91,7 +99,5 @@ export function getChainHex(networkKey) {
 }
 
 export async function disconnectWC() {
-    if (modal) {
-        try { await modal.disconnect(); } catch (_) {}
-    }
+    // no-op
 }
