@@ -14,8 +14,6 @@
     "@noble/post-quantum": "^0.2.0",
     "@reown/appkit": "^1.8.19",
     "@reown/appkit-adapter-ethers": "^1.8.19",
-    "@walletconnect/ethereum-provider": "^2.23.8",
-    "@walletconnect/modal": "^2.7.0",
     "Buffer": "^0.0.0",
     "ethers": "^6.13.0"
   },
