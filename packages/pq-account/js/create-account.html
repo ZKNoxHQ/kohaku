@@ -30,11 +30,6 @@
     <input type="hidden" id="rpcUrl" value="https://eth-sepolia-testnet.api.pocket.network">
     <span id="factory" style="display:none;">&mdash;</span>
 
-    <div id="falconNotice" class="falcon-info">
-        Falcon-512 uses a WASM-compiled signer and is available in software mode only.
-        Ledger support is not available for Falcon.
-    </div>
-
     <!-- Load deployments and wire up factory address -->
     <script type="module">
     import deployments from './deployments/deployments.json' assert { type: 'json' };
@@ -117,7 +112,6 @@
         const sel = document.getElementById('targetNetwork');
         const rpcInput = document.getElementById('rpcUrl');
         const accountModeSelect = document.getElementById('accountMode');
-        const falconNotice = document.getElementById('falconNotice');
         const pqAlgoName = document.getElementById('pqAlgoName');
 
         // Dropdown change → update RPC URL + factory
@@ -133,7 +127,6 @@
             if (window.__updateFactory) window.__updateFactory(networkKey, accountModeSelect.value);
 
             const isFalcon = accountModeSelect.value.startsWith('falcon');
-            falconNotice.style.display = isFalcon ? 'block' : 'none';
             if (pqAlgoName) pqAlgoName.textContent = isFalcon ? 'Falcon-512' : 'ML-DSA-44';
 
             // Disable/enable Ledger button
