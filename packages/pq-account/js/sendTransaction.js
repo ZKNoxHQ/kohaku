@@ -184,8 +184,10 @@ function setup() {
             if (!rpcUrl) { console.error('Please enter an RPC URL.'); return; }
 
             console.log('Connecting…');
+            console.log('RPC URL:', rpcUrl);
             const provider = new ethers.JsonRpcProvider(rpcUrl);
             const network = await provider.getNetwork();
+            console.log('Chain ID:', network.chainId.toString());
 
             const pqAlgo = document.getElementById('pqAlgo')?.value || 'mldsa';
 
