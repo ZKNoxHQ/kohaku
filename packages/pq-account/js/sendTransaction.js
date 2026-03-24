@@ -206,10 +206,11 @@ function setup() {
             let   targetAddress   = document.getElementById('targetAddress').value.trim();
             const valueEth        = document.getElementById('value').value.trim();
 
-            // Resolve ENS name if the target isn't a hex address
+            // Resolve ENS name (via mainnet) if the target isn't a hex address
             if (targetAddress && !targetAddress.startsWith('0x')) {
                 console.log('Resolving ENS name: ' + targetAddress);
-                const resolved = await provider.resolveName(targetAddress);
+                const mainnet = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
+                const resolved = await mainnet.resolveName(targetAddress);
                 if (!resolved) {
                     console.error('Could not resolve ENS name: ' + targetAddress);
                     return;
