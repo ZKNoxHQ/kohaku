@@ -203,8 +203,20 @@ function setup() {
             }
             const pimlicoApiKey   = document.getElementById('pimlicoApiKey').value.trim();
             const accountAddress  = document.getElementById('accountAddress').value.trim();
-            const targetAddress   = document.getElementById('targetAddress').value.trim();
+            let   targetAddress   = document.getElementById('targetAddress').value.trim();
             const valueEth        = document.getElementById('value').value.trim();
+
+            // Resolve ENS name if the target isn't a hex address
+            if (targetAddress && !targetAddress.startsWith('0x')) {
+                console.log('Resolving ENS name: ' + targetAddress);
+                const resolved = await provider.resolveName(targetAddress);
+                if (!resolved) {
+                    console.error('Could not resolve ENS name: ' + targetAddress);
+                    return;
+                }
+                targetAddress = resolved;
+                console.log('Resolved to: ' + targetAddress);
+            }
             const callData        = document.getElementById('callData').value.trim();
 
             const bundlerUrl = 'https://api.pimlico.io/v2/' + network.chainId + '/rpc?apikey=' + pimlicoApiKey;

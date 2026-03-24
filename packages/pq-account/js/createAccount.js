@@ -33,11 +33,9 @@ function toFalconEncodedBytes(falconPublicKey) {
 
     const packed = nttCompact(coeffs);
 
-    let hex = "0x";
-    for (const word of packed) {
-        hex += word.toString(16).padStart(64, "0");
-    }
-    return hex;
+    // ABI-encode as uint256[] for PKContract storage
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    return coder.encode(["uint256[]"], [packed]);
 }
 
 // ─── Main flow ──────────────────────────────────────────────────────────
