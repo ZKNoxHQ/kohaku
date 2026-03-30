@@ -13,7 +13,7 @@ import {Strings} from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import {ZKNOX_ERC4337_account} from "../src/ZKNOX_ERC4337_account.sol";
 
 import {PythonSigner} from "ETHFALCON/src/ZKNOX_PythonSigner.sol";
-import {_packUint256Array, _packSignature} from "ETHFALCON/src/ZKNOX_common.sol";
+import {_packSignature} from "ETHFALCON/src/ZKNOX_common.sol";
 import {Constants} from "ETHDILITHIUM/test/seed.sol";
 
 import {ZKNOX_falcon} from "ETHFALCON/src/ZKNOX_falcon.sol";
@@ -47,7 +47,9 @@ contract TestERC4337_Account is Test {
         // Signing a nonce to get access to pubkey
         string memory seedStr = Constants.SEED_POSTQUANTUM_STR;
         (uint256[32] memory pkCompact,,) = pythonSigner.sign("lib/ETHFALCON/pythonref", "0xabcd", "NIST", seedStr);
-        bytes memory postQuantumPubKey = _packUint256Array(pkCompact);
+        uint256[] memory pkArray = new uint256[](32);
+        for (uint256 i = 0; i < 32; i++) pkArray[i] = pkCompact[i];
+        bytes memory postQuantumPubKey = abi.encode(pkArray);
 
         // Deploy the Smart Account
         account = new ZKNOX_ERC4337_account(
