@@ -78,7 +78,7 @@ contract MLDSAETHFixedContract is VerifierDeployer {
 
 contract FALCONFixedContract is VerifierDeployer {
     constructor() {
-        saltLabel = "ZKNOX_FALCON_VERIFIER_V0_0_7";
+        saltLabel = "ZKNOX_FALCON_VERIFIER_V0_0_9";
         verifierKey = "falcon";
     }
     function deployContract(bytes32 salt) internal override returns (address) {
@@ -88,7 +88,7 @@ contract FALCONFixedContract is VerifierDeployer {
 
 contract ETHFALCONFixedContract is VerifierDeployer {
     constructor() {
-        saltLabel = "ZKNOX_ETHFALCON_VERIFIER_V0_0_3";
+        saltLabel = "ZKNOX_ETHFALCON_VERIFIER_V0_0_4";
         verifierKey = "ethfalcon";
     }
     function deployContract(bytes32 salt) internal override returns (address) {
