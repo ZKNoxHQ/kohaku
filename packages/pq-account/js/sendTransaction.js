@@ -209,8 +209,10 @@ function setup() {
             // Resolve ENS name (via mainnet) if the target isn't a hex address
             if (targetAddress && !targetAddress.startsWith('0x')) {
                 console.log('Resolving ENS name: ' + targetAddress);
-                const mainnet = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
-                const resolved = await mainnet.resolveName(targetAddress);
+                const resolved = await resolveEnsName(
+                    targetAddress,
+                    network.chainId === 1n ? provider : null
+                );
                 if (!resolved) {
                     console.error('Could not resolve ENS name: ' + targetAddress);
                     return;
@@ -245,6 +247,41 @@ if (document.readyState === 'loading') {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Public mainnet RPCs that answer CORS preflights, so ENS lookups work from
+ * the browser. Tried in order; llamarpc is deliberately absent (no
+ * Access-Control-Allow-Origin on OPTIONS).
+ */
+const ENS_RPC_URLS = [
+    'https://ethereum-rpc.publicnode.com',
+    'https://eth.drpc.org',
+    'https://eth.merkle.io',
+];
+
+/**
+ * Resolve an ENS name on mainnet, falling back across several public RPCs.
+ * Pass `mainnetProvider` when the user's own RPC already points at chain 1.
+ * Returns null if the name resolves nowhere.
+ */
+async function resolveEnsName(name, mainnetProvider = null) {
+    const providers = [];
+    if (mainnetProvider) providers.push(mainnetProvider);
+    for (const url of ENS_RPC_URLS) {
+        // staticNetwork: skip the eth_chainId round-trip, we know it is mainnet.
+        providers.push(new ethers.JsonRpcProvider(url, 1, { staticNetwork: true }));
+    }
+
+    for (const p of providers) {
+        try {
+            const resolved = await p.resolveName(name);
+            if (resolved) return resolved;
+        } catch (e) {
+            console.log('ENS lookup failed on one RPC, trying next: ' + e.message);
+        }
+    }
+    return null;
+}
 
 /**
  * Poll the bundler for a UserOperation receipt until it is mined.
