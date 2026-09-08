@@ -19,13 +19,14 @@
  *   - SIGN_DILITHIUM finalize returns SW only; the client fetches the full
  *     signature via GET_SIG_CHUNK (no first-256-B inline chunk).
  *
- * Path hardening: any INS touching the ML-DSA seed derivation on-device
- * (0x11 and the ML-DSA half of 0x16/0x17) requires an all-hardened BIP32
- * path — this is a SLIP-0010 ed25519-mode requirement. This module forces
- * hardening internally when calling those INS, so callers may pass a path
- * like "m/44'/60'/0'/0/0" and it will be sent to the device as
- * "m/44'/60'/0'/0'/0'". Pure-ECDSA INS (0x05, 0x15) keep the caller's
- * hardening exactly.
+ * Path hardening: the ML-DSA seed derivation on-device requires an
+ * all-hardened path (SLIP-0010 ed25519-mode requirement). The firmware's
+ * mldsa_derive_seed helper forces the hardened bit on every component
+ * before calling the SDK, so callers can pass any path here — including
+ * the standard non-hardened Ethereum path "m/44'/60'/0'/0/0" — and the
+ * ECDSA half of hybrid signing (0x16/0x17) will derive from the raw
+ * path (matching the account's stored ECDSA address), while the ML-DSA
+ * half derives from the same path with hardening forced.
  */
 
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
@@ -63,36 +64,6 @@ function encodeBip32Path(path) {
             const hardened = c.endsWith("'");
             const val = parseInt(hardened ? c.slice(0, -1) : c, 10);
             return hardened ? (val + 0x80000000) >>> 0 : val;
-        });
-
-    const buf = Buffer.alloc(1 + components.length * 4);
-    buf[0] = components.length;
-    components.forEach((c, i) => buf.writeUInt32BE(c, 1 + i * 4));
-    return buf;
-}
-
-/**
- * Encode a BIP32 path with all components forced to hardened.
- *
- * Required for any INS that touches ML-DSA seed derivation on-device
- * (KEYGEN_DILITHIUM, HYBRID_SIGN_HASH, HYBRID_SIGN_USEROP): the SDK's
- * ed25519 SLIP-0010 mode refuses non-hardened components. Matches
- * pqslip.js's client-side PQ derivation (which also forces all-hardened).
- *
- * Note: since HYBRID_SIGN_* signs with BOTH ECDSA and ML-DSA from the
- * *same* path, forcing hardening here means the ECDSA half of a hybrid
- * signature uses an all-hardened path too — this is intentional and
- * matches the on-device behavior; the resulting ECDSA address is
- * distinct from a non-hardened `m/44'/60'/0'/0/0` LedgerEthSigner EOA.
- */
-function encodeBip32PathHardened(path) {
-    const components = path
-        .replace("m/", "")
-        .split("/")
-        .map(c => {
-            const trimmed = c.endsWith("'") ? c.slice(0, -1) : c;
-            const val = parseInt(trimmed, 10);
-            return (val + 0x80000000) >>> 0;
         });
 
     const buf = Buffer.alloc(1 + components.length * 4);
@@ -183,7 +154,7 @@ export async function openTransportBLE() {
  * derived pk and seed in RAM until the next keygen/sign operation.
  */
 export async function getMldsaPublicKey(transport, bip32Path) {
-    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
+    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32Path(bip32Path));
     return readChunked(transport, INS.GET_PK_CHUNK, MLDSA44_PK_BYTES);
 }
 
@@ -201,7 +172,7 @@ export async function signMldsa(transport, bip32Path, messageBytes) {
     // Load the ML-DSA key for this path. SIGN_DILITHIUM's init step refuses
     // to run unless mldsa_seed is non-zero, so this step is required —
     // there is no "seed already loaded" fast path anymore.
-    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
+    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32Path(bip32Path));
 
     // 0x00 init: reset the signing accumulator on-device.
     await sendApdu(transport, INS.SIGN_DILITHIUM, 0x00, 0x00, null);
@@ -247,16 +218,15 @@ export async function signEcdsaHash(transport, bip32Path, hash) {
 /**
  * Hybrid blind-sign: single user confirmation → ECDSA + ML-DSA signatures.
  *
- * Path is forced all-hardened because the ML-DSA half of this INS uses the
- * same path input for its SLIP-0010 ed25519-mode derivation. The ECDSA
- * signature returned here is over an all-hardened path too — this address
- * is intentionally distinct from a non-hardened LedgerEthSigner EOA and
- * corresponds to the hybrid PQ account, not the deployer.
+ * Path is passed as-is: the on-device ECDSA half signs over the raw path
+ * (so `m/44'/60'/0'/0/0` produces the standard Ethereum address that
+ * matches the account's stored ECDSA pk), while the ML-DSA half's
+ * SLIP-0010 derivation forces hardening internally on the firmware side.
  */
 export async function signHybridHash(transport, bip32Path, hash) {
     if (hash.length !== 32) throw new Error("Hash must be 32 bytes");
 
-    const pathData = encodeBip32PathHardened(bip32Path);
+    const pathData = encodeBip32Path(bip32Path);
     const payload  = Buffer.concat([pathData, Buffer.from(hash)]);
     const resp     = await sendApdu(transport, INS.HYBRID_SIGN_HASH, 0x00, 0x00, payload);
 
@@ -275,8 +245,9 @@ export async function signHybridHash(transport, bip32Path, hash) {
 export async function signHybridUserOp(transport, bip32Path, userOp, entryPoint, chainId) {
     const I = INS.HYBRID_SIGN_USEROP;
 
-    // APDU 1: BIP32 path — forced hardened (see signHybridHash rationale).
-    await sendApdu(transport, I, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
+    // APDU 1: BIP32 path — passed as-is; ECDSA uses raw path, ML-DSA
+    // derivation forces hardening on the firmware side.
+    await sendApdu(transport, I, 0x00, 0x00, encodeBip32Path(bip32Path));
 
     // APDU 2: chain_id(32) | entry_point(20) | sender(20) | nonce(32)
     await sendApdu(transport, I, 0x01, 0x00, Buffer.concat([
