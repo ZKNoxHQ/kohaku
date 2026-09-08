@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import deployments from './deployments/deployments.json';
 import { redirectConsole } from './utils.js';
 import { deriveSeeds } from './pqslip.js';
 import { signHybridUserOp, setTransportMode } from './hardware-signer/ledgerTransport.js';
@@ -45,6 +46,57 @@ export function getDummySignature(pqAlgo = 'mldsa') {
     const dummyEcdsa = ethers.hexlify(new Uint8Array(65).fill(0xff));
     const dummyPq    = ethers.hexlify(new Uint8Array(pqDummySigLen(pqAlgo)).fill(0xff));
     return abi.encode(["bytes", "bytes"], [dummyEcdsa, dummyPq]);
+}
+
+/**
+ * Storage slot of `postQuantumLogicContractAddress` in ZKNOX_ERC4337_account
+ * (0 _entryPoint, 1 preQuantumPubKey, 2 postQuantumPubKey,
+ *  3 preQuantumLogicContractAddress, 4 postQuantumLogicContractAddress).
+ */
+const PQ_VERIFIER_SLOT = 4;
+
+/** Verifier names in deployments.json that each pqAlgo can legitimately talk to. */
+const PQ_VERIFIERS = {
+    mldsa:  ['mldsa', 'mldsaeth'],
+    falcon: ['falcon', 'ethfalcon'],
+};
+
+/** address (lowercase) → verifier name, across every network in deployments.json. */
+function verifierNameByAddress() {
+    const map = {};
+    for (const net of Object.values(deployments)) {
+        for (const [name, entry] of Object.entries(net.verifiers || {})) {
+            map[entry.address.toLowerCase()] = name;
+        }
+    }
+    return map;
+}
+
+/**
+ * Fail fast when the selected PQ algorithm is not the one the deployed account
+ * verifies with — otherwise the bundler only reports it as an opaque
+ * "AA23 reverted invalid s2 length" (the verifier rejecting a signature of the
+ * wrong size). No-op for accounts not deployed yet or verifiers we don't know.
+ */
+async function assertAccountUsesAlgo(provider, accountAddress, pqAlgo) {
+    const slot = await provider.getStorage(accountAddress, PQ_VERIFIER_SLOT);
+    const verifier = ethers.getAddress('0x' + slot.slice(-40));
+    if (verifier === ethers.ZeroAddress) return; // not deployed yet
+
+    const name = verifierNameByAddress()[verifier.toLowerCase()];
+    if (!name) {
+        console.log('Unknown PQ verifier ' + verifier + ' — skipping algorithm check.');
+        return;
+    }
+    console.log('Account PQ verifier: ' + name + ' (' + verifier + ')');
+
+    if (!(PQ_VERIFIERS[pqAlgo] || []).includes(name)) {
+        throw new Error(
+            'This account verifies with "' + name + '", but "' + pqAlgo +
+            '" is selected. Pick the matching algorithm (each one derives a different key, ' +
+            'so the account address differs too).'
+        );
+    }
 }
 
 // ─── Main flow ──────────────────────────────────────────────────────────
@@ -222,7 +274,9 @@ function setup() {
             }
             const callData        = document.getElementById('callData').value.trim();
 
-            const bundlerUrl = 'https://api.pimlico.io/v2/' + network.chainId + '/rpc?apikey=' + pimlicoApiKey;
+            await assertAccountUsesAlgo(provider, accountAddress, pqAlgo);
+
+            const bundlerUrl ='https://api.pimlico.io/v2/' + network.chainId + '/rpc?apikey=' + pimlicoApiKey;
 
             await sendERC4337Transaction(
                 accountAddress, targetAddress, ethers.parseEther(valueEth), callData,

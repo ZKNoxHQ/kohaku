@@ -1,16 +1,31 @@
 /**
  * Low-level Ledger APDU transport for ECDSA + ML-DSA commands.
  *
- * Firmware handlers:
- *   GET_MLDSA_SEED    (0x14)  → derive seed on secure element
- *   KEYGEN_DILITHIUM  (0x0c)  → generate keypair from stored seed
- *   SIGN_DILITHIUM    (0x0f)  → init / absorb / finalize signing
- *   GET_SIG_CHUNK     (0x12)  → retrieve signature chunks
- *   GET_PK_CHUNK      (0x13)  → retrieve public key chunks
- *   GET_PUBLIC_KEY    (0x05)  → ECDSA public key
- *   ECDSA_SIGN_HASH   (0x15)  → blind-sign hash with ECDSA
- *   HYBRID_SIGN_HASH  (0x16)  → single-confirm hybrid blind-sign
- *   HYBRID_SIGN_USEROP(0x17)  → clear-sign ERC-4337 UserOp
+ * Firmware handlers (app-mldsa, since the ZKNOX port):
+ *   GET_PUBLIC_KEY     (0x05)  → ECDSA public key
+ *   SIGN_DILITHIUM     (0x0f)  → init / absorb / finalize signing
+ *   KEYGEN_DILITHIUM   (0x11)  → derive ML-DSA-44 keypair from BIP32 path
+ *                                (path in cdata; personalization "ML-DSA-44 seed")
+ *   GET_SIG_CHUNK      (0x12)  → retrieve signature chunks (bounds-checked)
+ *   GET_PK_CHUNK       (0x13)  → retrieve public key chunks (bounds-checked)
+ *   ECDSA_SIGN_HASH    (0x15)  → blind-sign 32-byte hash with ECDSA
+ *   HYBRID_SIGN_HASH   (0x16)  → single-confirm hybrid blind-sign
+ *   HYBRID_SIGN_USEROP (0x17)  → clear-sign ERC-4337 UserOp
+ *
+ * Diverges from the pre-port ZKNOX firmware:
+ *   - GET_MLDSA_SEED (0x14) was removed (host must never see the seed).
+ *   - KEYGEN_DILITHIUM moved from 0x0c to 0x11; takes a BIP32 path in cdata
+ *     instead of relying on a pre-loaded seed.
+ *   - SIGN_DILITHIUM finalize returns SW only; the client fetches the full
+ *     signature via GET_SIG_CHUNK (no first-256-B inline chunk).
+ *
+ * Path hardening: any INS touching the ML-DSA seed derivation on-device
+ * (0x11 and the ML-DSA half of 0x16/0x17) requires an all-hardened BIP32
+ * path — this is a SLIP-0010 ed25519-mode requirement. This module forces
+ * hardening internally when calling those INS, so callers may pass a path
+ * like "m/44'/60'/0'/0/0" and it will be sent to the device as
+ * "m/44'/60'/0'/0'/0'". Pure-ECDSA INS (0x05, 0x15) keep the caller's
+ * hardening exactly.
  */
 
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
@@ -24,12 +39,11 @@ export function getTransportMode()     { return _transportMode; }
 const CLA = 0xe0;
 
 const INS = {
-    GET_MLDSA_SEED:     0x14,
-    KEYGEN_DILITHIUM:   0x0c,
+    GET_PUBLIC_KEY:     0x05,
     SIGN_DILITHIUM:     0x0f,
+    KEYGEN_DILITHIUM:   0x11,   // was 0x0c pre-port; takes a BIP32 path now
     GET_SIG_CHUNK:      0x12,
     GET_PK_CHUNK:       0x13,
-    GET_PUBLIC_KEY:     0x05,
     ECDSA_SIGN_HASH:    0x15,
     HYBRID_SIGN_HASH:   0x16,
     HYBRID_SIGN_USEROP: 0x17,
@@ -49,6 +63,36 @@ function encodeBip32Path(path) {
             const hardened = c.endsWith("'");
             const val = parseInt(hardened ? c.slice(0, -1) : c, 10);
             return hardened ? (val + 0x80000000) >>> 0 : val;
+        });
+
+    const buf = Buffer.alloc(1 + components.length * 4);
+    buf[0] = components.length;
+    components.forEach((c, i) => buf.writeUInt32BE(c, 1 + i * 4));
+    return buf;
+}
+
+/**
+ * Encode a BIP32 path with all components forced to hardened.
+ *
+ * Required for any INS that touches ML-DSA seed derivation on-device
+ * (KEYGEN_DILITHIUM, HYBRID_SIGN_HASH, HYBRID_SIGN_USEROP): the SDK's
+ * ed25519 SLIP-0010 mode refuses non-hardened components. Matches
+ * pqslip.js's client-side PQ derivation (which also forces all-hardened).
+ *
+ * Note: since HYBRID_SIGN_* signs with BOTH ECDSA and ML-DSA from the
+ * *same* path, forcing hardening here means the ECDSA half of a hybrid
+ * signature uses an all-hardened path too — this is intentional and
+ * matches the on-device behavior; the resulting ECDSA address is
+ * distinct from a non-hardened `m/44'/60'/0'/0/0` LedgerEthSigner EOA.
+ */
+function encodeBip32PathHardened(path) {
+    const components = path
+        .replace("m/", "")
+        .split("/")
+        .map(c => {
+            const trimmed = c.endsWith("'") ? c.slice(0, -1) : c;
+            const val = parseInt(trimmed, 10);
+            return (val + 0x80000000) >>> 0;
         });
 
     const buf = Buffer.alloc(1 + components.length * 4);
@@ -132,35 +176,46 @@ export async function openTransportBLE() {
 }
 
 /**
- * Derive the ML-DSA seed on the secure element for the given BIP32 path.
+ * Derive the ML-DSA-44 keypair on-device from a BIP32 path (SLIP-0010 with
+ * personalization "ML-DSA-44 seed"), and return the 1312-byte public key.
+ *
+ * The secret key never leaves the secure element. The device stores the
+ * derived pk and seed in RAM until the next keygen/sign operation.
  */
-export async function deriveMldsaSeed(transport, bip32Path) {
-    const pathData = encodeBip32Path(bip32Path);
-    const seed = await sendApdu(transport, INS.GET_MLDSA_SEED, 0x00, 0x00, pathData);
-    return new Uint8Array(seed);
-}
-
-/**
- * Generate keypair on-device and retrieve the 1312-byte public key.
- */
-export async function getMldsaPublicKey(transport) {
-    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, null);
+export async function getMldsaPublicKey(transport, bip32Path) {
+    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
     return readChunked(transport, INS.GET_PK_CHUNK, MLDSA44_PK_BYTES);
 }
 
 /**
  * Sign arbitrary bytes with ML-DSA-44 on the Ledger.
- * Flow: init → absorb (chunked) → finalize → read signature.
+ *
+ * Runs KEYGEN_DILITHIUM first to load the key for @p bip32Path, so this
+ * function is self-sufficient (pre-port ZKNOX required a separate
+ * deriveMldsaSeed step; that's now folded in).
+ *
+ * Flow: keygen (path) → init → absorb (chunked) → finalize (user approval
+ * on-device) → read signature via chunk fetch.
  */
-export async function signMldsa(transport, messageBytes) {
+export async function signMldsa(transport, bip32Path, messageBytes) {
+    // Load the ML-DSA key for this path. SIGN_DILITHIUM's init step refuses
+    // to run unless mldsa_seed is non-zero, so this step is required —
+    // there is no "seed already loaded" fast path anymore.
+    await sendApdu(transport, INS.KEYGEN_DILITHIUM, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
+
+    // 0x00 init: reset the signing accumulator on-device.
     await sendApdu(transport, INS.SIGN_DILITHIUM, 0x00, 0x00, null);
 
+    // 0x01 absorb: stream the payload into the on-device accumulator.
     const MAX_APDU_DATA = 250;
     for (let offset = 0; offset < messageBytes.length; offset += MAX_APDU_DATA) {
         const chunk = messageBytes.slice(offset, Math.min(offset + MAX_APDU_DATA, messageBytes.length));
         await sendApdu(transport, INS.SIGN_DILITHIUM, 0x01, 0x00, chunk);
     }
 
+    // 0x80 finalize: triggers on-device user approval, then signs. Our port
+    // accepts (and ignores) the ZKNOX 2-byte msg_len header; kept here so
+    // the wire matches ZKNOX for anyone sniffing.
     const msgLenBuf = Buffer.alloc(2);
     msgLenBuf.writeUInt16BE(messageBytes.length, 0);
     await sendApdu(transport, INS.SIGN_DILITHIUM, 0x80, 0x00, msgLenBuf);
@@ -191,11 +246,17 @@ export async function signEcdsaHash(transport, bip32Path, hash) {
 
 /**
  * Hybrid blind-sign: single user confirmation → ECDSA + ML-DSA signatures.
+ *
+ * Path is forced all-hardened because the ML-DSA half of this INS uses the
+ * same path input for its SLIP-0010 ed25519-mode derivation. The ECDSA
+ * signature returned here is over an all-hardened path too — this address
+ * is intentionally distinct from a non-hardened LedgerEthSigner EOA and
+ * corresponds to the hybrid PQ account, not the deployer.
  */
 export async function signHybridHash(transport, bip32Path, hash) {
     if (hash.length !== 32) throw new Error("Hash must be 32 bytes");
 
-    const pathData = encodeBip32Path(bip32Path);
+    const pathData = encodeBip32PathHardened(bip32Path);
     const payload  = Buffer.concat([pathData, Buffer.from(hash)]);
     const resp     = await sendApdu(transport, INS.HYBRID_SIGN_HASH, 0x00, 0x00, payload);
 
@@ -214,8 +275,8 @@ export async function signHybridHash(transport, bip32Path, hash) {
 export async function signHybridUserOp(transport, bip32Path, userOp, entryPoint, chainId) {
     const I = INS.HYBRID_SIGN_USEROP;
 
-    // APDU 1: BIP32 path
-    await sendApdu(transport, I, 0x00, 0x00, encodeBip32Path(bip32Path));
+    // APDU 1: BIP32 path — forced hardened (see signHybridHash rationale).
+    await sendApdu(transport, I, 0x00, 0x00, encodeBip32PathHardened(bip32Path));
 
     // APDU 2: chain_id(32) | entry_point(20) | sender(20) | nonce(32)
     await sendApdu(transport, I, 0x01, 0x00, Buffer.concat([

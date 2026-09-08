@@ -318,7 +318,7 @@
 import { ethers } from 'ethers';
 import { to_expanded_encoded_bytes } from './utils_mldsa.js';
 import {
-    openTransport, deriveMldsaSeed, getMldsaPublicKey, getEcdsaPublicKey,
+    openTransport, getMldsaPublicKey, getEcdsaPublicKey,
     signHybridUserOp, setTransportMode
 } from './hardware-signer/ledgerTransport.js';
 import { LedgerEthSigner } from './LedgerEthSigner.js';
@@ -417,8 +417,10 @@ $('btnCreate').addEventListener('click', async () => {
         const preQuantumPubKey = ethers.getAddress('0x' + ethers.keccak256(raw).slice(-40));
 
         setStatus(s, 'Reading ML-DSA key…', 'info');
-        await deriveMldsaSeed(transport, getBipPath());
-        const mldsaPub = await getMldsaPublicKey(transport);
+        // Post-port: getMldsaPublicKey derives the seed on-device (INS 0x11)
+        // and returns the pk in one call; the standalone deriveMldsaSeed
+        // step (pre-port INS 0x14) was removed on principle.
+        const mldsaPub = await getMldsaPublicKey(transport, getBipPath());
         const postQuantumPubKey = to_expanded_encoded_bytes(mldsaPub);
 
         if ((await provider.getCode(FACTORY)) === '0x') throw new Error('No contract at factory address');

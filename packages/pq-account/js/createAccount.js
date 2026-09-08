@@ -7,7 +7,6 @@ import * as softMldsaKeygen from './software-signer/mldsaKeygen.js';
 import * as softFalconKeygen from './software-signer/falconKeygen.js';
 import {
     openTransport,
-    deriveMldsaSeed,
     getMldsaPublicKey,
     getEcdsaPublicKey,
     setTransportMode,
@@ -106,9 +105,13 @@ async function main(mode) {
             const hash = ethers.keccak256(raw);
             preQuantumPubKey = ethers.getAddress('0x' + hash.slice(-40));
 
-            const mldsaSeed = await deriveMldsaSeed(transport, "m/44'/60'/0'/0/0");
-            console.log("Ledger PQ seed: " + Array.from(mldsaSeed).map(b => b.toString(16).padStart(2, '0')).join(''));
-            pqPublicKey = await getMldsaPublicKey(transport);
+            // Pre-port ZKNOX exposed GET_MLDSA_SEED (INS 0x14) for host-side seed
+            // inspection during account creation. The current app-mldsa firmware
+            // removed that INS on principle (the seed must never leave the
+            // device), so we jump straight to fetching the public key. The seed
+            // is still derived on-device from "m/44'/60'/0'/0/0" via SLIP-0010
+            // with personalization "ML-DSA-44 seed" (byte-identical to pqslip.js).
+            pqPublicKey = await getMldsaPublicKey(transport, "m/44'/60'/0'/0/0");
             console.log("Ledger PQ pubkey (first 32): " + Array.from(pqPublicKey.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join(''));
         } else {
             const mnemonic = document.getElementById('mnemonic').value.trim();
