@@ -16,14 +16,10 @@ make test_opt
 Note that Falcon key generation in python is a bit slow, and the test file computes it several times.
 In order to run tests separately:
 ```
-forge test test/ZKNOX_ERC4337_account_K1_ETHFALCON.t.sol -vv
 forge test test/ZKNOX_ERC4337_account_K1_FALCON.t.sol -vv
 forge test test/ZKNOX_ERC4337_account_K1_MLDSA.t.sol -vv
-forge test test/ZKNOX_ERC4337_account_K1_MLDSAETH.t.sol -vv
-forge test test/ZKNOX_ERC4337_account_R1_ETHFALCON.t.sol -vv
 forge test test/ZKNOX_ERC4337_account_R1_FALCON.t.sol -vv
 forge test test/ZKNOX_ERC4337_account_R1_MLDSA.t.sol -vv
-forge test test/ZKNOX_ERC4337_account_R1_MLDSAETH.t.sol -vv
 ```
 
 ## Fixed contracts
@@ -34,14 +30,12 @@ forge test test/ZKNOX_ERC4337_account_R1_MLDSAETH.t.sol -vv
 
 ### Post-quantum logic contracts
 - `ZKNOX_dilithium.sol`: verifies a MLDSA signature,
-- `ZKNOX_ethdilithium.sol`: verifies a MLDSAETH signature.
 - `ZKNOX_falcon.sol`: verifies a FALCON signature.
-- `ZKNOX_ethfalcon.sol`: verifies a ETHFALCON signature.
 
 ## User contracts
 Each user owns a 4337 account contract which contains:
 - a `pre_quantum_pubkey` in `bytes`; it can be an ethereum address (20 bytes) or a P256 point (64 bytes)
-- a `post_quantum_pubkey` in `bytes`; the address of a `PKContract` for MLDSA(ETH), the public key bytes for FALCON
+- a `post_quantum_pubkey` in `bytes`; the address of a `PKContract` for MLDSA, the public key bytes for FALCON
 - a `pre_quantum_logic_contract_address` referring to one of the two pre-quantum fixed contracts above,
 - a `post_quantum_logic_contract_address` referring to one of the two post-quantum fixed contracts above,
 
@@ -56,18 +50,17 @@ The signature verifier contract addresses are fixed and deployed once for all. T
 ### Example of user MLDSA PK contracts
 MLDSA public keys are large and we decided to write them inside contracts. Thus, each user needs to submit his (20kB) expanded MLDSA public key as an initialization step.
 
-We provide an example of public key contract for both MLDSA and MLDSAETH, on the two testnets:
+We provide an example of public key contract for MLDSA, on the two testnets:
 
 |Expanded PubKey Example for|Address on L1 Sepolia | Address on Arbitrum Sepolia|
 |-|-|-|
 |MLDSA   | [0xCc28B19d743F3E139D6D8078B6600bad95CD7B2c](https://sepolia.etherscan.io/address/0x898Fec6390D8297BC0C92F834E4210a821ccD8B8#code) | [0x8e130f25f30c9375971c9469f2adc30b6e91846f](https://sepolia.arbiscan.io/address/0x8e130f25f30c9375971c9469f2adc30b6e91846f#code) |
-|MLDSAETH| [0x898Fec6390D8297BC0C92F834E4210a821ccD8B8](https://sepolia.etherscan.io/address/0xCc28B19d743F3E139D6D8078B6600bad95CD7B2c#code) | [0xa854bf182dd854c7b85e35566aa5a46678e2be37](https://sepolia.arbiscan.io/address/0xa854bf182dd854c7b85e35566aa5a46678e2be37#code) |
 
 Note that these contracts do not correspond to the latest update of the contracts, but illustrate the structure of the contracts containing the public key.
 
 ### Gas cost
 Using the current contracts, the gas cost is the following:
-|Contracts|MLDSA|MLDSA-ETH|FALCON|ETHFALCON|
-|-|-|-|-|-|
-|ECDSA-k1|8.39M|5.12M|4.06M|1.69M|
-|ECDSA-r1|8.40M|5.13M|4.07M|1.70M|
+|Contracts|MLDSA|FALCON|
+|-|-|-|
+|ECDSA-k1|8.39M|4.06M|
+|ECDSA-r1|8.40M|4.07M|

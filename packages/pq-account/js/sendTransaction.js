@@ -57,8 +57,8 @@ const PQ_VERIFIER_SLOT = 4;
 
 /** Verifier names in deployments.json that each pqAlgo can legitimately talk to. */
 const PQ_VERIFIERS = {
-    mldsa:  ['mldsa', 'mldsaeth'],
-    falcon: ['falcon', 'ethfalcon'],
+    mldsa:  ['mldsa'],
+    falcon: ['falcon'],
 };
 
 /** address (lowercase) → verifier name, across every network in deployments.json. */
