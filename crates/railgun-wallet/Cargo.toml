@@ -1,6 +1,6 @@
 [package]
 name = "railgun-wallet"
-version = "0.7.3"
+version = "0.8.1"
 edition = "2024"
 description = "ZKNOX local Railgun wallet (daemon + web front) built on the kohaku Rust SDK"
 publish = false

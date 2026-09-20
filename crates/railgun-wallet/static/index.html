@@ -248,6 +248,14 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div class="tabs" id="transport-tabs" role="tablist"></div>
           <p class="hint" id="transport-note"></p>
           <div class="diag" id="transport-diag" hidden></div>
+          <div id="aa-options" hidden>
+            <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
+            <div class="row" id="aa-margin-row" hidden>
+              <div><label for="aa-margin">Gas margin (%)</label><input type="number" id="aa-margin" min="0" max="200" value="25"></div>
+              <div></div>
+            </div>
+            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once fixes the gas limits first, from a profile learned on an earlier transaction of the same shape plus this margin. You pay the margin, nothing is refunded. The first transaction of a shape still uses the default path, to learn it. If the limits turn out too low the operation stops before anything is sent.</p>
+          </div>
           <div id="legacy-limits" hidden>
             <div class="row">
               <div><label for="l-rate">Highest rate accepted (× gas cost)</label><input type="text" id="l-rate" inputmode="decimal" value="1.5"></div>
@@ -446,11 +454,18 @@ function parseDecimal18(text) {
 function rateCeiling() { return parseDecimal18($("l-rate").value || "1.5"); }
 function underCeiling(q) { const c = rateCeiling(); return c !== null && BigInt(q.feePerUnitGas) <= c; }
 function timesGas(rate) { const h = BigInt(rate) * 100n / PAR; return `${h / 100n}.${String(h % 100n).padStart(2, "0")}`; }
-function feeLimits() { return { maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null }; }
+function feeLimits() {
+  return {
+    maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null,
+    singleProof: $("aa-single").checked, gasMarginPercent: Number($("aa-margin").value) || null,
+  };
+}
 
 function renderLegacy(s) {
   const box = $("legacy-box"); const l = state.legacy;
   $("legacy-limits").hidden = state.transport !== "legacy";
+  $("aa-options").hidden = state.transport !== "erc4337";
+  $("aa-margin-row").hidden = !$("aa-single").checked;
   box.hidden = state.transport !== "legacy" || !l || !l.reachable;
   if (!l) return;
   const usable = legacyQuotes(s);
@@ -638,7 +653,9 @@ document.querySelectorAll("#action-tabs button").forEach((btn) => btn.addEventLi
   render();
 }));
 
-for (const id of ["l-rate", "l-maxfee"]) {
+try { $("aa-single").checked = localStorage.getItem("rgw:aa-single") === "1"; } catch {}
+$("aa-single").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-single", $("aa-single").checked ? "1" : "0"); } catch {} render(); });
+for (const id of ["l-rate", "l-maxfee", "aa-margin"]) {
   try { const v = localStorage.getItem("rgw:" + id); if (v !== null && v !== "") $(id).value = v; } catch {}
   $(id).addEventListener("input", () => { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} render(); });
 }

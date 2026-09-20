@@ -14,6 +14,7 @@ use userop_kit::{
     bundler::{Bundler, BundlerError},
     signable_user_operation::SignableUserOperation,
     smart_account::SmartAccount,
+    user_operation::UserOperationGasEstimate,
 };
 
 use crate::{
@@ -81,6 +82,92 @@ impl NoteEntry {
     }
 }
 
+/// Gas limits of a privacy-paymaster UserOperation, learned from one that converged through
+/// [`RailgunProvider::prepare_userop`]. Only `paymaster_overhead` needs explaining: it is the
+/// paymaster verification limit minus the gas of the bare `transact` call, which can be
+/// re-measured for every transaction with a dummy proof. What is left (fee note check, price
+/// quote, decoding) depends on the calldata size, hence on the shape of the operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserOpGasProfile {
+    pub pre_verification_gas: u128,
+    pub verification_gas_limit: u128,
+    pub call_gas_limit: u128,
+    pub paymaster_post_op_gas_limit: u128,
+    pub paymaster_overhead: u128,
+}
+
+impl UserOpGasProfile {
+    /// Profile of a converged UserOperation. `transact_gas` is [`DummyTransactGas::gas`] measured
+    /// for the same intents.
+    pub fn learn(signable: &SignableUserOperation, transact_gas: u64) -> Self {
+        let op = &signable.user_op;
+        Self {
+            pre_verification_gas: op.pre_verification_gas,
+            verification_gas_limit: op.verification_gas_limit,
+            call_gas_limit: op.call_gas_limit,
+            paymaster_post_op_gas_limit: op.paymaster_post_op_gas_limit.unwrap_or(0),
+            paymaster_overhead: op
+                .paymaster_verification_gas_limit
+                .unwrap_or(0)
+                .saturating_sub(u128::from(transact_gas)),
+        }
+    }
+
+    /// Field-wise maximum: a profile only ever grows as more operations are observed.
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            pre_verification_gas: self.pre_verification_gas.max(other.pre_verification_gas),
+            verification_gas_limit: self.verification_gas_limit.max(other.verification_gas_limit),
+            call_gas_limit: self.call_gas_limit.max(other.call_gas_limit),
+            paymaster_post_op_gas_limit: self
+                .paymaster_post_op_gas_limit
+                .max(other.paymaster_post_op_gas_limit),
+            paymaster_overhead: self.paymaster_overhead.max(other.paymaster_overhead),
+        }
+    }
+}
+
+/// Gas of the `transact` call alone, measured with a dummy proof, and the shape it was measured
+/// for: one `nullifiers x commitments` pair per operation, e.g. `"1x2+2x3"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DummyTransactGas {
+    pub gas: u64,
+    pub shape: String,
+}
+
+/// How [`RailgunProvider::prepare_userop_single_proof`] turns measurements into limits.
+#[derive(Debug, Clone, Copy)]
+pub struct SingleProofParams {
+    pub profile: UserOpGasProfile,
+    /// Added to every limit, in percent. The fee covers the limits, not the gas used, and the
+    /// Railgun fee adapter refunds nothing: this is what the single signature costs.
+    pub margin_percent: u32,
+    /// Limits are rounded up to a multiple of this. The fee is public in `paymasterData`, and
+    /// fee / maxFeePerGas gives the total gas: coarse steps reveal less about the transaction.
+    pub gas_bucket: u128,
+}
+
+/// What [`RailgunProvider::prepare_userop_single_proof`] decided, for logs and UIs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SingleProofReport {
+    pub shape: String,
+    pub transact_gas: u64,
+    pub total_gas_limit: u128,
+    pub max_fee_per_gas: u128,
+    pub fee: u128,
+    /// Paymaster verification gas measured on the real proof, against the limit committed to.
+    pub paymaster_verification_measured: u128,
+    pub paymaster_verification_limit: u128,
+}
+
+fn with_margin(value: u128, params: &SingleProofParams) -> u128 {
+    let padded = value + value * u128::from(params.margin_percent) / 100;
+    let bucket = params.gas_bucket.max(1);
+    padded.div_ceil(bucket) * bucket
+}
+
 fn list_key_string(key: &crate::poi::types::ListKey) -> String {
     serde_json::to_value(key)
         .ok()
@@ -120,6 +207,17 @@ pub enum RailgunProviderError {
     Rpc(#[from] Eip1193Error),
     #[error("POI is not enabled on this provider")]
     PoiDisabled,
+    #[error("the bundler gives no gas price outside of a simulation, which the single-proof path needs")]
+    NoBundlerGasPrice,
+    #[error(
+        "gas limits fixed before proving are too low: {what} needs {needed}, limit is {limit}. \
+         Nothing was sent. Raise the margin, or let the iterative path learn this shape again"
+    )]
+    LimitsTooLow {
+        what: &'static str,
+        needed: u128,
+        limit: u128,
+    },
     #[error("Privacy Paymaster not configured for chain: {0}")]
     PrivacyPaymasterNotConfigured(u64),
     #[error("Other: {0}")]
@@ -300,6 +398,227 @@ impl RailgunProvider {
 
         let proved_tx = ProvedTx::new(self.chain.railgun_smart_wallet, operations);
         Ok(proved_tx)
+    }
+
+    /// Gas of the bare `transact` call for `builder`, from a dummy proof: no proving, and no
+    /// request to the signer.
+    ///
+    /// The builder must carry no adapt contract: the estimate runs from the verification bypass
+    /// address, which the Railgun contract would refuse as `msg.sender` of an adapted call. The
+    /// difference with the adapted calldata is a few hundred gas.
+    pub async fn dummy_transact_gas(
+        &mut self,
+        builder: TransactionBuilder,
+        rng: &mut impl CryptoRng,
+    ) -> Result<DummyTransactGas, RailgunProviderError> {
+        let dummy = self.build_dummy(builder, rng).await?;
+        let shape = dummy
+            .proved_operations
+            .iter()
+            .map(|op| {
+                format!(
+                    "{}x{}",
+                    op.transaction.nullifiers.len(),
+                    op.transaction.commitments.len()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("+");
+        let gas = self
+            .provider
+            .estimate_gas(
+                dummy.tx_data.to,
+                dummy.tx_data.data,
+                Some(VERIFICATION_BYPASS),
+            )
+            .await?;
+        Ok(DummyTransactGas { gas, shape })
+    }
+
+    /// [`Self::dummy_transact_gas`] for the transaction [`Self::prepare_userop`] would build
+    /// from `builder`: the paymaster fee note is added, with a placeholder value that only
+    /// gives the transaction its shape. Use it to key and to learn a [`UserOpGasProfile`].
+    pub async fn dummy_userop_transact_gas(
+        &mut self,
+        builder: TransactionBuilder,
+        fee_payer: Arc<dyn RailgunSigner>,
+        fee_token: Address,
+        rng: &mut impl CryptoRng,
+    ) -> Result<DummyTransactGas, RailgunProviderError> {
+        let shaped = builder.transfer(
+            fee_payer,
+            paymaster_railgun_address(ChainId::evm(self.chain.id)),
+            AssetId::Erc20(fee_token),
+            100_000_000,
+            "fee",
+        );
+        self.dummy_transact_gas(shaped, rng).await
+    }
+
+    /// Same result as [`Self::prepare_userop`] with exactly one proof, hence one spending
+    /// signature per operation, instead of one per round of the fee convergence loop.
+    ///
+    /// The loop exists because the fee depends on the gas, which the bundler only estimates by
+    /// simulating a UserOperation carrying a valid proof, itself bound to the fee. Here the
+    /// limits are fixed first: the `transact` gas is measured with a dummy proof, the rest
+    /// comes from a [`UserOpGasProfile`] learned on an earlier operation of the same shape, and a
+    /// margin covers the difference. The fee follows from the limits, as the paymaster computes
+    /// it, so its check passes by construction.
+    ///
+    /// After proving, the paymaster verification gas is measured on the real proof and the
+    /// bundler is asked for its own estimate; if either exceeds a limit the call fails before
+    /// anything is sent. That costs a second signature, never funds.
+    pub async fn prepare_userop_single_proof<S: SmartAccount>(
+        &mut self,
+        builder: TransactionBuilder,
+        bundler: &dyn Bundler,
+        sender: &S,
+        fee_payer: Arc<dyn RailgunSigner>,
+        fee_token: Address,
+        calldata: S::Call,
+        params: SingleProofParams,
+        rng: &mut impl CryptoRng,
+    ) -> Result<(SignableUserOperation, SingleProofReport), RailgunProviderError> {
+        let privacy_paymaster = self.chain.privacy_paymaster.ok_or(
+            RailgunProviderError::PrivacyPaymasterNotConfigured(self.chain.id),
+        )?;
+        let railgun_fee_adapter = self.chain.railgun_fee_adapter.ok_or(
+            RailgunProviderError::PrivacyPaymasterNotConfigured(self.chain.id),
+        )?;
+        if fee_token != self.chain.wrapped_base_token {
+            return Err(RailgunProviderError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Currently only the wrapped base token is supported for fee payment",
+            ))));
+        }
+
+        let price = bundler
+            .gas_price()
+            .await?
+            .ok_or(RailgunProviderError::NoBundlerGasPrice)?;
+        let paymaster_railgun_address = paymaster_railgun_address(ChainId::evm(self.chain.id));
+        let fee_asset = AssetId::Erc20(fee_token);
+        let with_fee = |fee: u128| {
+            builder.clone().transfer(
+                fee_payer.clone(),
+                paymaster_railgun_address,
+                fee_asset,
+                fee,
+                "fee",
+            )
+        };
+
+        // Two dummy rounds: the fee is an output, it can change the notes selected and so the
+        // gas. The first fee is only there to give the transaction its shape.
+        let mut fee: u128 = 100_000_000;
+        let mut limits = UserOperationGasEstimate {
+            pre_verification_gas: 0,
+            verification_gas_limit: 0,
+            call_gas_limit: 0,
+            paymaster_verification_gas_limit: None,
+            paymaster_post_op_gas_limit: None,
+            max_fee_per_gas: price.max_fee_per_gas,
+            max_priority_fee_per_gas: price.max_priority_fee_per_gas,
+        };
+        let mut measured = DummyTransactGas {
+            gas: 0,
+            shape: String::new(),
+        };
+        let mut total_gas = 0u128;
+        for _ in 0..2 {
+            measured = self.dummy_transact_gas(with_fee(fee), rng).await?;
+            let p = &params.profile;
+            limits.pre_verification_gas = with_margin(p.pre_verification_gas, &params);
+            limits.verification_gas_limit = with_margin(p.verification_gas_limit, &params);
+            limits.call_gas_limit = with_margin(p.call_gas_limit, &params);
+            limits.paymaster_post_op_gas_limit =
+                Some(with_margin(p.paymaster_post_op_gas_limit, &params));
+            limits.paymaster_verification_gas_limit = Some(with_margin(
+                u128::from(measured.gas) + p.paymaster_overhead,
+                &params,
+            ));
+            total_gas = limits.pre_verification_gas
+                + limits.verification_gas_limit
+                + limits.call_gas_limit
+                + limits.paymaster_verification_gas_limit.unwrap_or(0)
+                + limits.paymaster_post_op_gas_limit.unwrap_or(0);
+            fee = total_gas * price.max_fee_per_gas;
+        }
+        info!(
+            "Single-proof UserOperation: shape {}, transact gas {}, total limit {}, fee {}",
+            measured.shape, measured.gas, total_gas, fee
+        );
+
+        // The one proof. This is the only place the spending signer is used.
+        let adapted = with_fee(fee).adapt(railgun_fee_adapter, *sender.address().into_word());
+        let operations = self.build_operation(adapted, rng).await?;
+        let fee_operation = get_fee_operation(&operations, fee_asset, fee)?;
+        let fee_note = get_fee_note(fee_operation, fee_asset, fee)?;
+        let transactions = operations.iter().map(|op| op.transaction.clone()).collect();
+        let paymaster_data = encode_paymaster_data(
+            railgun_fee_adapter,
+            encode_railgun_adapter_data(fee_note.random(), fee_token, fee, transactions),
+        );
+
+        let user_op_builder = UserOperationBuilder::new_with_smart_account(sender)
+            .await
+            .map_err(|e| RailgunProviderError::Other(Box::new(e)))?
+            .with_call(&calldata)
+            .with_paymaster_and_data(privacy_paymaster, paymaster_data);
+        let signable = user_op_builder.with_gas(limits).build();
+
+        // Check the limits against the real proof before anything leaves.
+        let pmv_limit = limits.paymaster_verification_gas_limit.unwrap_or(0);
+        let pmv_measured =
+            estimate_paymaster_verification_gas_limit(self.provider.as_ref(), &signable).await?;
+        if pmv_measured > pmv_limit {
+            return Err(RailgunProviderError::LimitsTooLow {
+                what: "paymaster verification",
+                needed: pmv_measured,
+                limit: pmv_limit,
+            });
+        }
+        let bundler_view = bundler.estimate_gas(&signable).await?;
+        for (what, needed, limit) in [
+            (
+                "pre-verification",
+                bundler_view.pre_verification_gas,
+                limits.pre_verification_gas,
+            ),
+            (
+                "account verification",
+                bundler_view.verification_gas_limit,
+                limits.verification_gas_limit,
+            ),
+            ("call", bundler_view.call_gas_limit, limits.call_gas_limit),
+            (
+                "paymaster post-op",
+                bundler_view.paymaster_post_op_gas_limit.unwrap_or(0),
+                limits.paymaster_post_op_gas_limit.unwrap_or(0),
+            ),
+        ] {
+            if needed > limit {
+                return Err(RailgunProviderError::LimitsTooLow {
+                    what,
+                    needed,
+                    limit,
+                });
+            }
+        }
+
+        if let Some(poi_provider) = &mut self.poi_provider {
+            poi_provider.register_ops(&operations).await?;
+        }
+        let report = SingleProofReport {
+            shape: measured.shape,
+            transact_gas: measured.gas,
+            total_gas_limit: total_gas,
+            max_fee_per_gas: price.max_fee_per_gas,
+            fee,
+            paymaster_verification_measured: pmv_measured,
+            paymaster_verification_limit: pmv_limit,
+        };
+        Ok((signable, report))
     }
 
     /// Build a transaction builder into a broadcastable 7702 UserOperation.
@@ -584,4 +903,63 @@ mod abi {
             }
         }
     );
+}
+
+#[cfg(test)]
+mod single_proof_tests {
+    use super::*;
+
+    fn params(margin_percent: u32, gas_bucket: u128) -> SingleProofParams {
+        SingleProofParams {
+            profile: UserOpGasProfile {
+                pre_verification_gas: 0,
+                verification_gas_limit: 0,
+                call_gas_limit: 0,
+                paymaster_post_op_gas_limit: 0,
+                paymaster_overhead: 0,
+            },
+            margin_percent,
+            gas_bucket,
+        }
+    }
+
+    #[test]
+    fn margin_then_bucket_rounds_up() {
+        assert_eq!(with_margin(100_000, &params(25, 10_000)), 130_000);
+        assert_eq!(with_margin(104_000, &params(25, 10_000)), 130_000);
+        assert_eq!(with_margin(104_001, &params(25, 10_000)), 140_000);
+        assert_eq!(with_margin(0, &params(25, 10_000)), 0);
+        // A zero bucket must not divide by zero.
+        assert_eq!(with_margin(100, &params(10, 0)), 110);
+    }
+
+    #[test]
+    fn profile_merge_only_grows() {
+        let a = UserOpGasProfile {
+            pre_verification_gas: 50,
+            verification_gas_limit: 10,
+            call_gas_limit: 7,
+            paymaster_post_op_gas_limit: 1,
+            paymaster_overhead: 900,
+        };
+        let b = UserOpGasProfile {
+            pre_verification_gas: 40,
+            verification_gas_limit: 20,
+            call_gas_limit: 7,
+            paymaster_post_op_gas_limit: 3,
+            paymaster_overhead: 100,
+        };
+        let merged = a.merge(b);
+        assert_eq!(
+            merged,
+            UserOpGasProfile {
+                pre_verification_gas: 50,
+                verification_gas_limit: 20,
+                call_gas_limit: 7,
+                paymaster_post_op_gas_limit: 3,
+                paymaster_overhead: 900,
+            }
+        );
+        assert_eq!(merged, b.merge(a));
+    }
 }

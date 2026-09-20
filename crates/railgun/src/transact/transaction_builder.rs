@@ -539,7 +539,13 @@ async fn prove_operation(
         commitment_ciphertexts,
     );
 
-    let inputs = TransactCircuitInputs::from_inputs(
+    // A dummy build (no prover) must not reach the signer: see `from_inputs_unsigned`.
+    let make_inputs = if prover.is_some() {
+        TransactCircuitInputs::from_inputs
+    } else {
+        TransactCircuitInputs::from_inputs_unsigned
+    };
+    let inputs = make_inputs(
         utxo_tree,
         bound_params.hash(),
         operation.from.clone(),
@@ -706,6 +712,51 @@ mod tests {
             split,
             Err(TransactionBuilderError::BroadcasterFeeSplit { value: 15 })
         ));
+    }
+
+    /// Stands for a hardware or threshold signer: counts how often it is asked to sign.
+    struct CountingSigner {
+        inner: Arc<PrivateKeySigner>,
+        signatures: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RailgunSigner for CountingSigner {
+        fn sign(&self, inputs: U256) -> Result<crate::crypto::keys::SpendingSignature, crate::account::signer::RailgunSignerError> {
+            self.signatures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.sign(inputs)
+        }
+        fn spending_key(&self) -> crate::crypto::keys::SpendingKey {
+            self.inner.spending_key()
+        }
+        fn viewing_key(&self) -> crate::crypto::keys::ViewingKey {
+            self.inner.viewing_key()
+        }
+        fn chain_id(&self) -> crate::account::chain::ChainId {
+            self.inner.chain_id()
+        }
+    }
+
+    /// A gas estimate must not cost a confirmation on a Ledger, or a FROST ceremony.
+    #[test]
+    fn dummy_build_never_asks_the_signer() {
+        let key = PrivateKeySigner::new_evm(random(), random(), 1);
+        let other = PrivateKeySigner::new_evm(random(), random(), 1);
+        let me = Arc::new(CountingSigner {
+            inner: key.clone(),
+            signatures: Default::default(),
+        });
+        // Notes are owned by the same keys, whoever signs.
+        let notes = [note(&key, 0, 0, WETH, 100), note(&key, 0, 1, USDC, 1_000)];
+        let trees = tree_with(&notes, 0);
+
+        let builder = TransactionBuilder::new()
+            .transfer(me.clone(), other.address(), USDC, 500, "")
+            .broadcaster_fee(me.clone(), other.address(), WETH, 25)
+            .unwrap();
+        let dummy = block_on(builder.build_dummy(1, &notes, &trees, &mut rand::rng())).unwrap();
+
+        assert_eq!(dummy.len(), 2);
+        assert_eq!(me.signatures.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     /// `minGasPrice` is part of the proven bound params: 0 by default, and the dummy build has

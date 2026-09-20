@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.1 (2026-09-20)
+
+Documentation only. The 4337 "prove once" path is validated on Sepolia: a transfer in the default
+mode recorded the gas profile of its shape, the same transfer with "prove once" then went through
+with a single proof, limits accepted by the paymaster and the bundler. The margin (25%) has not
+been tuned against the measured figures yet.
+
+## 0.8.0 (2026-09-20)
+
+Aimed at hardware and threshold signers, where every spending signature is a confirmation on the
+device or a signing ceremony.
+
+* Fix (SDK fork): `build_dummy` no longer reaches the signer. It went through
+  `TransactCircuitInputs::from_inputs`, which signs; invisible with a software key, one
+  confirmation per gas estimate with a Ledger. New `from_inputs_unsigned`, and a unit test with a
+  counting signer. The legacy path now costs one signature per operation instead of three.
+* 4337 "prove once" option (SDK fork: `RailgunProvider::prepare_userop_single_proof`): gas
+  limits are fixed before proving, from the dummy-proof gas of the `transact` call, a
+  `UserOpGasProfile` learned on an earlier operation of the same shape, and a margin (default
+  25%, limits rounded up to 10k gas). The fee follows from the limits, so the paymaster check
+  passes by construction. After proving, the paymaster verification gas is measured on the real
+  proof and the bundler's own estimate is compared with the limits; if one is too low the
+  operation stops before anything is sent.
+* Profiles are learned from every converged iterative estimate and kept in
+  `<data-dir>/<chain>/gas_profiles.json`, keyed by shape (`1x2+2x3|calls=0`). Without a profile
+  for a shape, "prove once" falls back to the iterative path for that transaction and says so.
+* userop-kit fork: `Bundler::gas_price`, the bundler's price without a simulation
+  (`pimlico_getUserOperationGasPrice`).
+* If the dummy-proof estimate fails in the default mode, the operation carries on without
+  learning: the path validated on Sepolia is unchanged.
+
+Checked here: unit tests (54 in `railgun`), API and front. Not checked: the single-proof path on
+a chain. It needs a learned profile, so the first live run is: one 4337 transfer in the default
+mode (records the profile), then the same with "prove once".
+
 ## 0.7.3 (2026-09-20)
 
 Documentation only. Legacy transport validated end to end on Sepolia: private transfer and

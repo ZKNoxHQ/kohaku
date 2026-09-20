@@ -158,3 +158,35 @@ No DNS discovery and no peer exchange, unlike the reference client: three fixed 
 
 The bundle is committed as a build artefact so that `cargo build` needs no Node toolchain.
 Rebuild: `cd crates/railgun-wallet/waku-bridge && npm ci && npm run build`.
+
+## ADR-016: one proof on the 4337 path, by fixing the gas limits first
+
+`prepare_userop` re-proves until the fee matches the bundler's estimate, because the estimate
+needs a valid proof and the proof binds the fee. Each round is a spending signature over
+(merkle root, bound params, nullifiers, commitments): up to five confirmations on a Ledger, five
+ceremonies with FROST.
+
+A dummy proof cannot replace the rounds: the bundler simulates `validatePaymasterUserOp`, whose
+caller must be the EntryPoint, so `tx.origin` cannot be the verification bypass address. What a
+dummy proof can measure is the bare `transact` call. The paymaster verification limit is that
+gas plus an overhead (fee note check, price quote, decoding) which depends on calldata size,
+learned once per shape. The other limits barely move for a given shape and come from the same
+profile.
+
+The privacy paymaster requires `fee >= quote(maxCost)`, `maxCost` being limits times
+`maxFeePerGas`, so choosing the limits determines the fee exactly. Cost of the approach: the
+margin, never refunded (the Railgun adapter sets no refund recipient). Failure modes and their
+handling:
+
+* limits too low: detected on the real proof before sending; costs a second signature;
+* tail calls out of gas after a native unshield: the only case that strands funds, on the
+  ephemeral sender whose key the wallet records; the call limit is learned from real
+  transactions of the same shape and padded by the margin;
+* the fee is public in `paymasterData` and fee / maxFeePerGas gives the total gas. Limits padded
+  by a fixed margin tell a single-proof wallet from an iterative one. Rounding to 10k gas hides
+  the exact transaction, not the wallet family. Only a rule shared by all wallets would.
+
+Not done: a gas table shipped with the wallet, which would remove the learning transaction. It
+needs measurements on each chain. And `RailgunSigner` still exposes `spending_key()`, which a
+hardware signer cannot implement: `TransactCircuitInputs` only needs the public key, a change
+for the hardware integration itself.

@@ -32,7 +32,7 @@ use railgun::{
     builder::RailgunBuilder,
     caip::AssetId,
     chain_config::ChainConfig,
-    provider::RailgunProvider,
+    provider::{RailgunProvider, SingleProofParams, UserOpGasProfile},
     transact::TransactionBuilder,
 };
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,12 @@ fn default_bundler_url(chain_id: u64) -> String {
 /// A broadcaster of the reference implementation takes its gas cost plus a margin of 10 to
 /// 30%. Half as much again leaves room for that and refuses anything predatory.
 const DEFAULT_MAX_FEE_RATE: &str = "1.5";
+
+const DEFAULT_GAS_MARGIN_PERCENT: u32 = 25;
+const MAX_GAS_MARGIN_PERCENT: u32 = 200;
+
+/// Limits are rounded up to this, so the public fee says less about the transaction.
+const GAS_BUCKET: u128 = 10_000;
 
 const DEFAULT_WAKU_URL: &str = "http://127.0.0.1:8645";
 
@@ -227,6 +233,13 @@ pub struct FeeLimits {
     pub max_fee_rate: Option<String>,
     /// Highest accepted fee for the whole transaction, in wrapped base token ("0.002").
     pub max_fee: Option<String>,
+    /// 4337: prove once, with gas limits fixed beforehand from a learned profile plus a margin,
+    /// instead of re-proving until the fee converges. One spending signature per operation,
+    /// which is what a hardware or threshold signer needs.
+    #[serde(default)]
+    pub single_proof: bool,
+    /// Margin added to the limits in single-proof mode, percent. Defaults to 25.
+    pub gas_margin_percent: Option<u32>,
 }
 
 impl Op {
@@ -808,24 +821,114 @@ impl Session {
                 );
                 let account =
                     SimpleSmartAccount::new(sender.address(), self.chain.id, self.provider.clone());
-                ctx.step(format!(
-                    "preparing UserOperation from ephemeral sender {} (proof is regenerated until the fee converges)",
-                    sender.address()
-                ));
-                let signable = self
+                let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
+                let fee_token = self.chain.wrapped_base_token;
+                // Shape of the transaction, fee note included: what gas profiles are keyed on.
+                // Only the single-proof mode depends on it: the iterative path must keep working
+                // when this estimate is refused by the node.
+                let measured = match self
                     .railgun
-                    .prepare_userop(
-                        builder,
-                        &bundler as &dyn Bundler,
-                        &account,
-                        self.signer.clone() as Arc<dyn RailgunSigner>,
-                        self.chain.wrapped_base_token,
-                        calls,
+                    .dummy_userop_transact_gas(
+                        builder.clone(),
+                        railgun_signer.clone(),
+                        fee_token,
                         &mut rand::rng(),
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(m) => Some(m),
+                    Err(e) if self.fee_limits.single_proof => {
+                        return Err(anyhow!(e).context("dummy-proof gas of the transact call"));
+                    }
+                    Err(e) => {
+                        warn!("dummy-proof gas estimate failed, no gas profile will be learned: {e}");
+                        None
+                    }
+                };
+                let profile_key = measured
+                    .as_ref()
+                    .map(|m| format!("{}|calls={}", m.shape, calls.len()));
+                let known = profile_key
+                    .as_deref()
+                    .and_then(|key| GasProfiles::load(&self.profiles_path()).get(key));
+                let shape_label = profile_key.clone().unwrap_or_else(|| "unknown".into());
+
+                let (signable, mode) = match (self.fee_limits.single_proof, known) {
+                    (true, Some(profile)) => {
+                        let margin_percent = self
+                            .fee_limits
+                            .gas_margin_percent
+                            .unwrap_or(DEFAULT_GAS_MARGIN_PERCENT)
+                            .min(MAX_GAS_MARGIN_PERCENT);
+                        ctx.step(format!(
+                            "single proof from ephemeral sender {}: shape {shape_label}, learned profile, margin {margin_percent}%",
+                            sender.address()
+                        ));
+                        let (signable, report) = self
+                            .railgun
+                            .prepare_userop_single_proof(
+                                builder,
+                                &bundler as &dyn Bundler,
+                                &account,
+                                railgun_signer,
+                                fee_token,
+                                calls,
+                                SingleProofParams {
+                                    profile,
+                                    margin_percent,
+                                    gas_bucket: GAS_BUCKET,
+                                },
+                                &mut rand::rng(),
+                            )
+                            .await?;
+                        ctx.step(format!(
+                            "proved once: gas limit {} (transact {}), paymaster verification measured {} of {} allowed",
+                            report.total_gas_limit,
+                            report.transact_gas,
+                            report.paymaster_verification_measured,
+                            report.paymaster_verification_limit
+                        ));
+                        (signable, "single-proof")
+                    }
+                    (single, _) => {
+                        if single {
+                            ctx.step(format!(
+                                "no gas profile for shape {shape_label} yet: using the iterative estimate once, which learns it"
+                            ));
+                        }
+                        ctx.step(format!(
+                            "preparing UserOperation from ephemeral sender {} (proof is regenerated until the fee converges)",
+                            sender.address()
+                        ));
+                        let signable = self
+                            .railgun
+                            .prepare_userop(
+                                builder,
+                                &bundler as &dyn Bundler,
+                                &account,
+                                railgun_signer,
+                                fee_token,
+                                calls,
+                                &mut rand::rng(),
+                            )
+                            .await?;
+                        // Learn from every converged estimate, so single-proof has a profile next
+                        // time this shape comes up.
+                        if let (Some(m), Some(key)) = (&measured, &profile_key) {
+                            let learned = UserOpGasProfile::learn(&signable, m.gas);
+                            match GasProfiles::record(&self.profiles_path(), key, learned) {
+                                Ok(()) => ctx.step(format!("gas profile recorded for shape {key}")),
+                                Err(e) => warn!("could not record gas profile: {e:#}"),
+                            }
+                        }
+                        (signable, "iterative")
+                    }
+                };
                 let max_fee = signable.total_gas_limit() * signable.user_op.max_fee_per_gas;
-                ctx.step(format!("fee converged, max fee {max_fee} wei in wrapped base token"));
+                ctx.step(format!(
+                    "fee {} wrapped token ({mode})",
+                    trim_decimal(format_units(U256::from(max_fee), 18u8).unwrap_or_default())
+                ));
                 let signed = signable.sign(&sender).await?;
                 let hash = bundler.send_user_operation(&signed).await?;
                 ctx.step(format!("UserOperation {:?} sent, waiting for receipt", hash.0));
@@ -838,6 +941,7 @@ impl Session {
                     "userOpHash": format!("{:?}", hash.0),
                     "sender": sender.address().to_string(),
                     "maxFeeWei": max_fee.to_string(),
+                    "feeMode": mode,
                 })
             }
         };
@@ -1046,6 +1150,13 @@ impl Session {
         }
     }
 
+    fn profiles_path(&self) -> PathBuf {
+        self.data_dir
+            .parent()
+            .unwrap_or(&self.data_dir)
+            .join("gas_profiles.json")
+    }
+
     async fn post_tx_sync(&mut self, ctx: &JobCtx<'_>) {
         ctx.step(format!(
             "waiting {}s for indexing, then syncing",
@@ -1165,6 +1276,37 @@ impl Session {
                 .collect(),
             updated_at: now_ms(),
         }
+    }
+}
+
+/// Learned [`UserOpGasProfile`]s, one JSON file per chain. Not secret and not tied to an
+/// account: gas depends on the shape of the transaction, not on who sends it.
+#[derive(Default, Serialize, Deserialize)]
+struct GasProfiles(HashMap<String, UserOpGasProfile>);
+
+impl GasProfiles {
+    fn load(path: &Path) -> Self {
+        std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn get(&self, key: &str) -> Option<UserOpGasProfile> {
+        self.0.get(key).copied()
+    }
+
+    fn record(path: &Path, key: &str, learned: UserOpGasProfile) -> Result<()> {
+        let mut all = Self::load(path);
+        let merged = all.get(key).map_or(learned, |known| known.merge(learned));
+        all.0.insert(key.to_string(), merged);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     }
 }
 
