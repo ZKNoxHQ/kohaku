@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.9.1 (2026-09-20)
+
+* Fix: "prove once" stopped after the proof with `account verification needs 51698, limit is
+  20000`. The probe measures the account's `validateUserOp` (9.5k), but EntryPoint v0.8 charges
+  its own pre-validation work to `verificationGasLimit` as well (`AA26`): copying the
+  UserOperation, prefund, the EIP-7702 sender path, nonce validation. The probe replaces the
+  EntryPoint and cannot measure that. The limit is now the account's gas plus
+  `ENTRY_POINT_VALIDATION_OVERHEAD` (60k), then the margin.
+* First live run of the probe (Sepolia): the public RPC accepts state overrides, the real
+  paymaster validation was simulated before any signature (1,393,206 gas), and the
+  pre-verification and paymaster limits derived from it passed the checks on the real proof.
+
+## 0.9.0 (2026-09-20)
+
+"Prove once" no longer depends on anything learned or configured.
+
+* The gas profiles of 0.8.0 are gone (`gas_profiles.json`, learning from the iterative path,
+  keys per shape and per chain). They were a cache of measurements that could go stale with a
+  contract upgrade, and the first transaction of each shape still signed several times.
+* Instead the exact UserOperation is simulated before any signature, with a dummy proof:
+  `userop_kit::validation_probe` builds an `eth_call` sent from the Railgun verification bypass
+  origin, with a small probe contract overriding the EntryPoint's code. Account validation,
+  paymaster validation (which performs the `transact`), tail calls and `postOp` run in EntryPoint
+  order and the probe reports the gas of each. The fresh 7702 sender gets the code of its
+  implementation by override. Two rounds, then the margin (default 25%, 10k gas steps).
+* Only `preVerificationGas` is computed, by the ERC-4337 reference formula plus the 7702
+  authorization cost: it prices inclusion, not execution. It gets twice the margin, and the
+  bundler's estimate on the final UserOperation is still checked before sending.
+* Strict mode ("never fall back"): when the limits cannot be simulated, typically an RPC without
+  state overrides, stop before any signature instead of using the iterative path.
+* SDK fork: `RailgunProvider::dummy_userop`, `prepare_userop_single_proof` now takes the gas
+  figures; `UserOpGasProfile`, `dummy_transact_gas` and the profile parameters are removed.
+
+Checked here: the probe against anvil with mock account and paymaster (caller seen as the
+EntryPoint, bypass origin, phases in order with state carried over, revert reasons, nothing
+persisted), unit tests, API and front. Not checked: the probe against the real paymaster and a
+7702 sender, and whether the public RPC accepts state overrides.
+
 ## 0.8.1 (2026-09-20)
 
 Documentation only. The 4337 "prove once" path is validated on Sepolia: a transfer in the default

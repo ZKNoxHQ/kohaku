@@ -32,7 +32,7 @@ use railgun::{
     builder::RailgunBuilder,
     caip::AssetId,
     chain_config::ChainConfig,
-    provider::{RailgunProvider, SingleProofParams, UserOpGasProfile},
+    provider::RailgunProvider,
     transact::TransactionBuilder,
 };
 use serde::{Deserialize, Serialize};
@@ -42,6 +42,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 use userop_kit::{
     bundler::{Bundler, pimlico::PimlicoBundler},
+    user_operation::UserOperationGasEstimate,
     smart_account::simple_smart_account::{Call, SimpleSmartAccount},
 };
 
@@ -240,6 +241,10 @@ pub struct FeeLimits {
     pub single_proof: bool,
     /// Margin added to the limits in single-proof mode, percent. Defaults to 25.
     pub gas_margin_percent: Option<u32>,
+    /// With `single_proof`: fail rather than fall back to the iterative path when the limits
+    /// cannot be simulated. For signers where several signatures are not an option.
+    #[serde(default)]
+    pub single_proof_strict: bool,
 }
 
 impl Op {
@@ -823,106 +828,84 @@ impl Session {
                     SimpleSmartAccount::new(sender.address(), self.chain.id, self.provider.clone());
                 let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
                 let fee_token = self.chain.wrapped_base_token;
-                // Shape of the transaction, fee note included: what gas profiles are keyed on.
-                // Only the single-proof mode depends on it: the iterative path must keep working
-                // when this estimate is refused by the node.
-                let measured = match self
-                    .railgun
-                    .dummy_userop_transact_gas(
-                        builder.clone(),
-                        railgun_signer.clone(),
-                        fee_token,
-                        &mut rand::rng(),
-                    )
-                    .await
-                {
-                    Ok(m) => Some(m),
-                    Err(e) if self.fee_limits.single_proof => {
-                        return Err(anyhow!(e).context("dummy-proof gas of the transact call"));
-                    }
-                    Err(e) => {
-                        warn!("dummy-proof gas estimate failed, no gas profile will be learned: {e}");
-                        None
-                    }
-                };
-                let profile_key = measured
-                    .as_ref()
-                    .map(|m| format!("{}|calls={}", m.shape, calls.len()));
-                let known = profile_key
-                    .as_deref()
-                    .and_then(|key| GasProfiles::load(&self.profiles_path()).get(key));
-                let shape_label = profile_key.clone().unwrap_or_else(|| "unknown".into());
-
-                let (signable, mode) = match (self.fee_limits.single_proof, known) {
-                    (true, Some(profile)) => {
-                        let margin_percent = self
-                            .fee_limits
-                            .gas_margin_percent
-                            .unwrap_or(DEFAULT_GAS_MARGIN_PERCENT)
-                            .min(MAX_GAS_MARGIN_PERCENT);
-                        ctx.step(format!(
-                            "single proof from ephemeral sender {}: shape {shape_label}, learned profile, margin {margin_percent}%",
-                            sender.address()
-                        ));
-                        let (signable, report) = self
-                            .railgun
-                            .prepare_userop_single_proof(
-                                builder,
-                                &bundler as &dyn Bundler,
-                                &account,
-                                railgun_signer,
-                                fee_token,
-                                calls,
-                                SingleProofParams {
-                                    profile,
-                                    margin_percent,
-                                    gas_bucket: GAS_BUCKET,
-                                },
-                                &mut rand::rng(),
-                            )
-                            .await?;
-                        ctx.step(format!(
-                            "proved once: gas limit {} (transact {}), paymaster verification measured {} of {} allowed",
-                            report.total_gas_limit,
-                            report.transact_gas,
-                            report.paymaster_verification_measured,
-                            report.paymaster_verification_limit
-                        ));
-                        (signable, "single-proof")
-                    }
-                    (single, _) => {
-                        if single {
+                let (signable, mode) = if self.fee_limits.single_proof {
+                    let margin_percent = self
+                        .fee_limits
+                        .gas_margin_percent
+                        .unwrap_or(DEFAULT_GAS_MARGIN_PERCENT)
+                        .min(MAX_GAS_MARGIN_PERCENT);
+                    match self
+                        .simulate_gas_limits(ctx, &builder, &bundler, &account, &calls, margin_percent)
+                        .await
+                    {
+                        Ok(gas) => {
                             ctx.step(format!(
-                                "no gas profile for shape {shape_label} yet: using the iterative estimate once, which learns it"
+                                "proving once from ephemeral sender {}",
+                                sender.address()
+                            ));
+                            let (signable, report) = self
+                                .railgun
+                                .prepare_userop_single_proof(
+                                    builder,
+                                    &bundler as &dyn Bundler,
+                                    &account,
+                                    railgun_signer,
+                                    fee_token,
+                                    calls,
+                                    gas,
+                                    &mut rand::rng(),
+                                )
+                                .await?;
+                            ctx.step(format!(
+                                "proved once: paymaster verification measured {} of {} allowed",
+                                report.paymaster_verification_measured,
+                                report.paymaster_verification_limit
+                            ));
+                            (signable, "single-proof")
+                        }
+                        Err(e) if self.fee_limits.single_proof_strict => {
+                            return Err(e.context(
+                                "gas limits could not be simulated and falling back to several \
+                                 signatures is disabled. Nothing was signed",
                             ));
                         }
-                        ctx.step(format!(
-                            "preparing UserOperation from ephemeral sender {} (proof is regenerated until the fee converges)",
-                            sender.address()
-                        ));
-                        let signable = self
-                            .railgun
-                            .prepare_userop(
-                                builder,
-                                &bundler as &dyn Bundler,
-                                &account,
-                                railgun_signer,
-                                fee_token,
-                                calls,
-                                &mut rand::rng(),
-                            )
-                            .await?;
-                        // Learn from every converged estimate, so single-proof has a profile next
-                        // time this shape comes up.
-                        if let (Some(m), Some(key)) = (&measured, &profile_key) {
-                            let learned = UserOpGasProfile::learn(&signable, m.gas);
-                            match GasProfiles::record(&self.profiles_path(), key, learned) {
-                                Ok(()) => ctx.step(format!("gas profile recorded for shape {key}")),
-                                Err(e) => warn!("could not record gas profile: {e:#}"),
-                            }
+                        Err(e) => {
+                            ctx.step(format!(
+                                "gas limits could not be simulated ({e:#}): falling back to the iterative estimate, which signs several times"
+                            ));
+                            let signable = self
+                                .railgun
+                                .prepare_userop(
+                                    builder,
+                                    &bundler as &dyn Bundler,
+                                    &account,
+                                    railgun_signer,
+                                    fee_token,
+                                    calls,
+                                    &mut rand::rng(),
+                                )
+                                .await?;
+                            (signable, "iterative")
                         }
-                        (signable, "iterative")
                     }
+                } else {
+                    ctx.step(format!(
+                        "preparing UserOperation from ephemeral sender {} (proof is regenerated until the fee converges)",
+                        sender.address()
+                    ));
+                    let signable = self
+                        .railgun
+                        .prepare_userop(
+                            builder,
+                            &bundler as &dyn Bundler,
+                            &account,
+                            railgun_signer,
+                            fee_token,
+                            calls,
+                            &mut rand::rng(),
+                        )
+                        .await?;
+                    (signable, "iterative")
                 };
                 let max_fee = signable.total_gas_limit() * signable.user_op.max_fee_per_gas;
                 ctx.step(format!(
@@ -1113,6 +1096,138 @@ impl Session {
         }
     }
 
+    /// Gas limits of the UserOperation, measured before any proof or signature.
+    ///
+    /// A dummy-proof UserOperation is run through `userop_kit::validation_probe`: an `eth_call`
+    /// from the Railgun verification bypass origin, with the probe's code overriding the
+    /// EntryPoint, executes account validation, paymaster validation (which performs the
+    /// `transact`), the tail calls and `postOp`, and reports the gas of each. Two rounds, since
+    /// the fee is an output note and can change the inputs selected. Only `preVerificationGas`
+    /// is computed, by the reference formula: it prices inclusion, not execution, and gets twice
+    /// the margin because the bundler has the last word on it.
+    async fn simulate_gas_limits(
+        &mut self,
+        ctx: &JobCtx<'_>,
+        builder: &TransactionBuilder,
+        bundler: &PimlicoBundler,
+        account: &SimpleSmartAccount,
+        calls: &Vec<Call>,
+        margin_percent: u32,
+    ) -> Result<UserOperationGasEstimate> {
+        use alloy::rpc::types::state::{AccountOverride, StateOverride};
+        use userop_kit::validation_probe::{self as probe, pad_gas};
+
+        let price = (bundler as &dyn Bundler)
+            .gas_price()
+            .await
+            .context("asking the bundler for its gas price")?
+            .ok_or_else(|| anyhow!("the bundler gives no gas price outside of a simulation"))?;
+        let railgun_signer = self.signer.clone() as Arc<dyn RailgunSigner>;
+        let fee_token = self.chain.wrapped_base_token;
+
+        // The probe does not enforce limits: they only enter through `maxCost`, against which
+        // the paymaster checks the fee. Each round therefore pays exactly its own limits, as the
+        // real UserOperation will. Round one starts from plausible figures so that this fee is
+        // affordable; round two uses what round one measured.
+        let mut gas = UserOperationGasEstimate {
+            pre_verification_gas: 150_000,
+            verification_gas_limit: 100_000,
+            call_gas_limit: if calls.is_empty() { 20_000 } else { 150_000 },
+            paymaster_verification_gas_limit: Some(1_200_000),
+            paymaster_post_op_gas_limit: Some(50_000),
+            max_fee_per_gas: price.max_fee_per_gas,
+            max_priority_fee_per_gas: price.max_priority_fee_per_gas,
+        };
+        let total_of = |g: &UserOperationGasEstimate| {
+            g.pre_verification_gas
+                + g.verification_gas_limit
+                + g.call_gas_limit
+                + g.paymaster_verification_gas_limit.unwrap_or(0)
+                + g.paymaster_post_op_gas_limit.unwrap_or(0)
+        };
+        let mut measured = None;
+        for _round in 1..=2 {
+            let fee = total_of(&gas) * price.max_fee_per_gas;
+            let dummy = self
+                .railgun
+                .dummy_userop(
+                    builder.clone(),
+                    account,
+                    railgun_signer.clone(),
+                    fee_token,
+                    calls,
+                    fee,
+                    gas,
+                    &mut rand::rng(),
+                )
+                .await?;
+            let max_cost = U256::from(dummy.total_gas_limit()) * U256::from(price.max_fee_per_gas);
+            let request = probe::request(&dummy, max_cost);
+
+            let mut overrides = StateOverride::default();
+            for (address, code) in &request.code_overrides {
+                overrides.insert(*address, AccountOverride::default().with_code(code.clone()));
+            }
+            if let Some((from, to)) = request.copy_code_from {
+                // The 7702 delegation of the fresh sender is not on-chain yet: give it the code
+                // it will delegate to.
+                let code = self
+                    .provider
+                    .get_code_at(from)
+                    .await
+                    .context("reading the account implementation code")?;
+                overrides.insert(to, AccountOverride::default().with_code(code));
+            }
+            overrides.insert(
+                railgun::provider::VERIFICATION_BYPASS,
+                AccountOverride::default().with_balance(U256::from(10u128.pow(24))),
+            );
+
+            let call = alloy::rpc::types::TransactionRequest::default()
+                .from(railgun::provider::VERIFICATION_BYPASS)
+                .to(request.to)
+                .input(request.data.clone().into())
+                .gas_limit(25_000_000);
+            let answer = self
+                .provider
+                .call(call)
+                .overrides(overrides)
+                .await
+                .context("eth_call with state overrides (does this RPC support them?)")?;
+
+            let phases = probe::decode(&answer, !calls.is_empty())?;
+
+            let pre_verification = probe::pre_verification_gas(&dummy);
+            gas.pre_verification_gas = pad_gas(pre_verification, margin_percent * 2, GAS_BUCKET);
+            // The EntryPoint charges its own pre-validation work to this limit (AA26), which the
+            // probe cannot see: see `ENTRY_POINT_VALIDATION_OVERHEAD`.
+            gas.verification_gas_limit = pad_gas(
+                phases.account_validation + probe::ENTRY_POINT_VALIDATION_OVERHEAD,
+                margin_percent,
+                GAS_BUCKET,
+            );
+            // Floors: bundlers refuse limits they find implausibly low, even for phases that do
+            // nothing, and a refusal after the proof costs a signature. They cost under 3% of fee.
+            gas.call_gas_limit = pad_gas(phases.call, margin_percent, GAS_BUCKET).max(30_000);
+            gas.paymaster_verification_gas_limit =
+                Some(pad_gas(phases.paymaster_validation, margin_percent, GAS_BUCKET));
+            gas.paymaster_post_op_gas_limit = Some(if phases.post_op_called {
+                pad_gas(phases.post_op, margin_percent, GAS_BUCKET).max(10_000)
+            } else {
+                10_000
+            });
+            let total = total_of(&gas);
+            measured = Some((phases, pre_verification, total));
+        }
+
+        let (phases, pre_verification, total) = measured.expect("two rounds ran");
+        ctx.step(format!(
+            "simulated before signing: account {}, paymaster {}, calls {}, post-op {}, pre-verification {} (formula); limits with {margin_percent}% margin total {total} gas",
+            phases.account_validation, phases.paymaster_validation, phases.call, phases.post_op, pre_verification
+        ));
+        Ok(gas)
+    }
+
     /// `gas_price` must be the `minGasPrice` bound in the builder, if any: the Railgun contract
     /// compares it to `tx.gasprice`, which is 0 in an estimate that names no price, and reverts
     /// with "Gas price too low". The estimate then runs as the legacy (type 0) transaction the
@@ -1148,13 +1263,6 @@ impl Session {
             }
             Err(e) => Err(e.into()),
         }
-    }
-
-    fn profiles_path(&self) -> PathBuf {
-        self.data_dir
-            .parent()
-            .unwrap_or(&self.data_dir)
-            .join("gas_profiles.json")
     }
 
     async fn post_tx_sync(&mut self, ctx: &JobCtx<'_>) {
@@ -1276,37 +1384,6 @@ impl Session {
                 .collect(),
             updated_at: now_ms(),
         }
-    }
-}
-
-/// Learned [`UserOpGasProfile`]s, one JSON file per chain. Not secret and not tied to an
-/// account: gas depends on the shape of the transaction, not on who sends it.
-#[derive(Default, Serialize, Deserialize)]
-struct GasProfiles(HashMap<String, UserOpGasProfile>);
-
-impl GasProfiles {
-    fn load(path: &Path) -> Self {
-        std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
-    }
-
-    fn get(&self, key: &str) -> Option<UserOpGasProfile> {
-        self.0.get(key).copied()
-    }
-
-    fn record(path: &Path, key: &str, learned: UserOpGasProfile) -> Result<()> {
-        let mut all = Self::load(path);
-        let merged = all.get(key).map_or(learned, |known| known.merge(learned));
-        all.0.insert(key.to_string(), merged);
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
     }
 }
 

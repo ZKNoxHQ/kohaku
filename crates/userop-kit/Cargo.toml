@@ -40,3 +40,7 @@ cfg_aliases = { workspace = true }
 alloy = { workspace = true, features = ["signer-local"] }
 insta = "1.47.2"
 tokio = { workspace = true, features = ["full"] }
+
+[dev-dependencies]
+alloy = { workspace = true, default-features = true }
+tokio = { workspace = true, features = ["full"] }

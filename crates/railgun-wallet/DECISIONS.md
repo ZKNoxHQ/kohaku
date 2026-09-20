@@ -190,3 +190,41 @@ Not done: a gas table shipped with the wallet, which would remove the learning t
 needs measurements on each chain. And `RailgunSigner` still exposes `spending_key()`, which a
 hardware signer cannot implement: `TransactCircuitInputs` only needs the public key, a change
 for the hardware integration itself.
+
+## ADR-017: simulate the UserOperation ourselves instead of learning gas profiles
+
+Supersedes the profile part of ADR-016. A learned profile is configuration: it can be missing
+(first transaction of a shape), stale (contract upgrade) or wrong for a chain, and nothing in it
+could not be measured.
+
+The obstacle was the origin: the paymaster only accepts the EntryPoint as caller, and the Railgun
+verifier only accepts a dummy proof when `tx.origin` is its bypass address. A bundler simulating
+for us picks its own origin. An `eth_call` of our own does not have that problem: state override
+replaces the EntryPoint's code by a probe that calls the account and the paymaster as the
+EntryPoint would, and the call is sent from the bypass address. This is the technique bundlers
+use with `EntryPointSimulations`, with a probe of 1.7 kB written for the purpose rather than the
+full contract, whose immutables do not survive being installed by override.
+
+What stays an estimate: `preVerificationGas` is the bundler's price for inclusion, not an
+execution cost, so no simulation yields it. The reference formula plus a double margin is used,
+and the bundler's own figure is checked after the proof. If a bundler prices it higher than the
+formula by more than that margin, the operation stops before sending, at the cost of one
+signature; the margin is then the knob.
+
+Dependency: an RPC that supports state overrides in `eth_call` (geth, reth, erigon, Nethermind
+and the hosted providers built on them do). Without it there is no way to sign once, which is
+what strict mode makes explicit.
+
+## ADR-018: one constant after all, for the EntryPoint's own validation overhead
+
+ADR-017 claimed nothing was configured. The first live run showed one figure the probe cannot
+produce: what the EntryPoint spends around the account's validation and charges to
+`verificationGasLimit`. Measuring it would take the real EntryPoint in the loop, which brings
+back the origin problem the probe exists to avoid (a dummy signature makes `handleOps` revert,
+and `EntryPointSimulations` does not survive installation by override with its immutables).
+
+It is kept as a named constant in `userop_kit::validation_probe`, with the measurement it comes
+from. It depends on the EntryPoint version only, is small next to the paymaster validation
+(60k of about 2M gas, 3% of the fee), and the bundler's estimate is still compared after the
+proof. It differs in kind from the removed profiles: those were per shape and per chain, and
+could be absent.
