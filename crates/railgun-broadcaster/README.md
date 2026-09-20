@@ -1,0 +1,74 @@
+# railgun-broadcaster
+
+Rust client for the Railgun community broadcaster network, the "legacy" relay transport: a
+broadcaster submits the shielded transaction from its own EOA and is paid by a note inside it.
+Protocol follows `@railgun-community/waku-broadcaster-client` 9.x and `shared-models`.
+
+## What it does
+
+* `wire`: content topics (`/railgun/v2/0-<chain>-{fees,transact,transact-response}/json`), relay
+  shard `/waku/2/rs/5/1`, message types.
+* `crypto`: the wallet to broadcaster channel. `@noble/ed25519` v1 `getSharedSecret` (X25519 on
+  the Montgomery form of ed25519 keys, raw output as AES key), AES-256-GCM with a 16-byte nonce
+  over JSON, ed25519 verification of fee messages. Checked against vectors generated with noble
+  1.7.3 and Node crypto.
+* `fees`: authentication of announcements with the viewing key of the announcing 0zk address,
+  version range, expiry margin of 40 s, cache, ranking, and `token_fee`
+  (`feePerUnitGas * gasEstimate * 1.2 * gasPrice / 1e18`).
+* Trusted fee signers (`TrustPolicy`): offers are capped to 10% under and 30% over the rate
+  announced by configured 0zk addresses, as in the reference client. Not set by default;
+  `RAILWAY_TRUSTED_FEE_SIGNERS` holds the list the Railway wallet uses.
+* Rate ceiling (`best_quote`): for the wrapped base token the par rate is known, so a multiple
+  of `PAR_RATE_WRAPPED_BASE_TOKEN` bounds any broadcaster without trusting anyone.
+* `client`: `pump()` to keep the cache current, `seal()` with a fresh ephemeral key per request,
+  `send()` with the reference retry schedule (republish every 2 s for 20 s, listen up to 120 s).
+* `transport`: the `WakuTransport` trait, `BrowserBridge` (node in a browser tab, js-waku),
+  `NwakuRest` (local nwaku), and an in-memory hub for tests.
+
+What the wallet still does itself, because it owns the `RailgunProvider` and the RPC: gas price,
+dummy-proof gas estimate, `broadcaster_fee` + `min_gas_price` on the builder, proof,
+pre-transaction POIs. See `railgun-wallet/src/engine.rs::submit_legacy`.
+
+## Waku node
+
+The wallet's default is a js-waku light node in its own tab, through `BrowserBridge`: nothing to
+install. The rest of this section is the alternative.
+
+There is no mature Waku node in Rust, so the default transport talks to a local
+[nwaku](https://github.com/waku-org/nwaku) over REST. Start one on the Railgun shard, for example:
+
+```sh
+docker run --rm -p 8645:8645 wakuorg/nwaku:latest \
+  --cluster-id=5 --shard=1 --num-shards-in-network=6 \
+  --relay=true --rln-relay=false --max-msg-size=512KiB \
+  --rest=true --rest-address=0.0.0.0 --rest-port=8645 --rest-admin=true \
+  --rest-relay-cache-capacity=3000 \
+  --dns-discovery=true \
+  --dns-discovery-url=enrtree://APMYHUVNQWHJNPI5L2KQ765EMCKUAMRWPUH3U2QIKPK6XEV3OW442@discovery.rootedinprivacy.com
+```
+
+Cluster, shard and ENR tree come from the reference client's constants; the shard is confirmed by
+Railway's remote configuration (`wakuPubSubTopic`), which lists no additional direct peer. The command itself has
+not been run here: flag names change between nwaku releases, check `--help` of the image you
+pull. The wallet shows the peer count and the offers it receives, which tells at once whether the
+node is on the right shard.
+
+## Without the network
+
+```sh
+cargo run -p railgun-broadcaster --example fake_network -- 8645 11155111
+```
+
+serves the same REST subset from memory with one mock broadcaster that announces a fee and
+answers every request with a made-up hash. Nothing reaches a chain. Useful to work on a wallet's
+legacy path up to the proof.
+
+## Tests
+
+`cargo test -p railgun-broadcaster --lib --tests`: interop vectors, fee arithmetic (including
+the u128 overflow case), and wallet/broadcaster exchanges over the in-memory hub (forged or
+out-of-range announcements dropped, request opened only by its addressee, refusal and timeout
+told apart).
+
+Not covered: a live broadcaster. The first real run will validate the request as a whole, the
+pre-transaction POI format above all.

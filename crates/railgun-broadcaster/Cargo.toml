@@ -1,0 +1,34 @@
+[package]
+name = "railgun-broadcaster"
+version = "0.4.1"
+edition = "2024"
+description = "Client for the Railgun community broadcaster network (Waku transport)"
+publish = false
+
+[lib]
+doctest = false
+
+[features]
+# In-memory Waku hub and a mock broadcaster, for tests of downstream crates.
+testing = []
+
+[dependencies]
+aes-gcm = { workspace = true }
+async-trait = { workspace = true }
+base64 = "0.22"
+curve25519-dalek = { workspace = true }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+railgun = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time", "sync"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+railgun-broadcaster = { path = ".", features = ["testing"] }
+tokio = { workspace = true, features = ["full"] }
