@@ -95,6 +95,12 @@ const MAX_GAS_MARGIN_PERCENT: u32 = 200;
 /// Limits are rounded up to this, so the public fee says less about the transaction.
 const GAS_BUCKET: u128 = 10_000;
 
+/// The draw is among offers at most this much above the cheapest, as in the reference client.
+const BROADCASTER_DRAW_PERCENT: u32 = 10;
+
+/// A broadcaster that did not answer is left out of the draw for this long.
+const SILENT_BROADCASTER_PENALTY: Duration = Duration::from_secs(600);
+
 const DEFAULT_WAKU_URL: &str = "http://127.0.0.1:8645";
 
 /// Gas assumed for the first fee guess, before the dummy-proof estimate replaces it.
@@ -241,6 +247,8 @@ pub struct FeeLimits {
     pub single_proof: bool,
     /// Margin added to the limits in single-proof mode, percent. Defaults to 25.
     pub gas_margin_percent: Option<u32>,
+    /// Legacy: 0zk address of the broadcaster to use, instead of a draw among the cheapest.
+    pub broadcaster: Option<String>,
     /// With `single_proof`: fail rather than fall back to the iterative path when the limits
     /// cannot be simulated. For signers where several signatures are not an option.
     #[serde(default)]
@@ -274,6 +282,7 @@ struct Session {
     chain: ChainConfig,
     provider: DynProvider,
     eoa: Option<EoaSigner>,
+    eoa_source: Option<String>,
     signer: Arc<RgSigner>,
     railgun: RailgunProvider,
     derivation: &'static str,
@@ -281,6 +290,10 @@ struct Session {
     data_dir: PathBuf,
     tokens: HashMap<Address, TokenMeta>,
     broadcaster: Arc<BroadcasterClient>,
+    /// The tab's Waku link when that is the transport, to read what happened to publishes.
+    bridge: Option<Arc<railgun_broadcaster::BrowserBridge>>,
+    /// Broadcasters that did not answer, with the time of the failure. Skipped for a while.
+    silent_broadcasters: Vec<(String, std::time::Instant)>,
     /// Limits of the operation being run, set by `Engine::run`.
     fee_limits: FeeLimits,
     /// Multi-thread runtime of the HTTP server. Waku I/O runs there: this thread's runtime is
@@ -426,11 +439,24 @@ impl Engine {
         let signer = RgSigner::new_evm(keys.spending, keys.viewing, chain.id);
         let address = signer.address().to_string();
 
-        let eoa = match p.eoa_key.as_deref().map(str::trim) {
-            Some(k) if !k.is_empty() => {
-                Some(EoaSigner::from_str(k).map_err(|e| anyhow!("invalid EOA key: {e}"))?)
+        // Public account: an explicit key wins; otherwise the Ethereum account of the same
+        // phrase, at the same index, as every mnemonic wallet derives it.
+        let (eoa, eoa_source) = match (p.eoa_key.as_deref().map(str::trim), &p.mnemonic) {
+            (Some(k), _) if !k.is_empty() => (
+                Some(EoaSigner::from_str(k).map_err(|e| anyhow!("invalid EOA key: {e}"))?),
+                Some("imported key".to_string()),
+            ),
+            (_, Some(m)) if !m.trim().is_empty() => {
+                let key = keys::derive_ethereum_key(m, p.index)?;
+                (
+                    Some(
+                        EoaSigner::from_bytes(&key.into())
+                            .map_err(|e| anyhow!("derived Ethereum key: {e}"))?,
+                    ),
+                    Some(keys::ethereum_path(p.index)),
+                )
             }
-            _ => None,
+            _ => (None, None),
         };
 
         let rpc_url = match p.rpc_url.as_deref().map(str::trim) {
@@ -532,6 +558,7 @@ impl Engine {
             chain,
             provider,
             eoa,
+            eoa_source,
             signer,
             railgun,
             derivation,
@@ -539,6 +566,8 @@ impl Engine {
             data_dir,
             tokens: HashMap::new(),
             broadcaster,
+            bridge: (waku_mode == "browser").then(|| self.shared.bridge.clone()),
+            silent_broadcasters: Vec::new(),
             fee_limits: FeeLimits::default(),
             io: self.io.clone(),
             fee_monitor,
@@ -972,10 +1001,41 @@ impl Session {
             _ => None,
         };
 
-        let quote: FeeQuote = match self
+        self.silent_broadcasters
+            .retain(|(_, since)| since.elapsed() < SILENT_BROADCASTER_PENALTY);
+        let chosen = self
+            .fee_limits
             .broadcaster
-            .best_quote(&fee_token.to_string(), &list_keys, Some(max_rate))
-        {
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .map(str::to_string);
+        let selection = match &chosen {
+            // An explicit choice is honoured even if that broadcaster was silent before: that
+            // is how one tests a given broadcaster.
+            Some(address) => self
+                .broadcaster
+                .quotes_for(&fee_token.to_string(), &list_keys)
+                .into_iter()
+                .find(|q| &q.railgun_address == address && q.fee_per_unit_gas <= max_rate)
+                .ok_or(NoQuote::None),
+            None => {
+                let exclude: Vec<String> =
+                    self.silent_broadcasters.iter().map(|(a, _)| a.clone()).collect();
+                self.broadcaster.select_quote(
+                    &fee_token.to_string(),
+                    &list_keys,
+                    Some(max_rate),
+                    BROADCASTER_DRAW_PERCENT,
+                    &exclude,
+                    |n| {
+                        use rand::RngExt;
+                        rand::rng().random_range(0..n.max(1))
+                    },
+                )
+            }
+        };
+        let quote: FeeQuote = match selection {
             Ok(quote) => quote,
             Err(NoQuote::AboveCeiling { cheapest, rejected, .. }) => bail!(
                 "{rejected} broadcaster offer(s), the cheapest at {} times the gas cost, above \
@@ -984,6 +1044,10 @@ impl Session {
                 format_rate(cheapest)
             ),
             Err(e @ NoQuote::PoiListMismatch { .. }) => bail!("{e}. Nothing was sent."),
+            Err(NoQuote::None) if chosen.is_some() => bail!(
+                "the chosen broadcaster has no usable offer right now (expired, over your ceiling, \
+                 or outside the trusted band). Clear the choice to draw among the others."
+            ),
             Err(NoQuote::None) => bail!(
                 "no usable broadcaster offer for the wrapped base token. Either the Waku node \
                  is not on the Railgun shard, or a trusted fee signer is set and has not \
@@ -1070,6 +1134,7 @@ impl Session {
             &mut rand::rng(),
         )?;
 
+        let stats_before = self.bridge.as_ref().map(|b| b.publish_stats());
         ctx.step("request sealed and published, waiting for the broadcaster (up to 120s)");
         let client = self.broadcaster.clone();
         let outcome = self
@@ -1088,10 +1153,80 @@ impl Session {
                     "minGasPrice": gas_price.to_string(),
                 }))
             }
-            Err(ClientError::Timeout(_)) => bail!(
-                "no answer from the broadcaster within 120s. It may still have sent the \
-                 transaction: sync and check that the input notes are gone before retrying."
-            ),
+            Err(ClientError::Timeout(_)) => {
+                // Did the request leave the tab at all? A light push that fails looks the same
+                // as a broadcaster that stays silent, and the remedy is not.
+                let delivery = match (&self.bridge, stats_before) {
+                    (Some(bridge), Some(before)) => {
+                        let after = bridge.publish_stats();
+                        let delivered = after.delivered - before.delivered;
+                        let failed = after.failed - before.failed;
+                        let unacked = (after.queued - before.queued).saturating_sub(delivered + failed);
+                        ctx.step(format!(
+                            "publishes through the tab: {delivered} accepted by a Waku peer, {failed} failed{}, {unacked} never acknowledged by the tab",
+                            after.last_error.as_ref().filter(|_| failed > 0).map(|e| format!(" ({e})")).unwrap_or_default()
+                        ));
+                        Some(delivered)
+                    }
+                    _ => None,
+                };
+                if delivery != Some(0) {
+                    // It was delivered (or we cannot tell): the broadcaster is the silent party.
+                    self.silent_broadcasters
+                        .push((quote.railgun_address.clone(), std::time::Instant::now()));
+                }
+                // No answer is not an outcome. The chain is: a spent input means the
+                // transaction was mined, whoever sent it.
+                ctx.step("no answer from the broadcaster within 120s: checking on-chain whether the inputs were spent");
+                let inputs: Vec<(u32, u32)> = proved
+                    .proved_operations
+                    .iter()
+                    .flat_map(|op| op.inner.in_notes().iter().map(|n| (n.tree_number, n.leaf_index)))
+                    .collect();
+                let address = self.signer.address();
+                for attempt in 1..=4 {
+                    tokio::time::sleep(Duration::from_secs(20)).await;
+                    if let Err(e) = self.railgun.sync().await {
+                        ctx.step(format!("sync {attempt}/4 failed: {e}"));
+                        continue;
+                    }
+                    let unspent = self.railgun.notes(address).await;
+                    let still_there = inputs
+                        .iter()
+                        .filter(|(t, l)| unspent.iter().any(|n| n.tree_number == *t && n.leaf_index == *l))
+                        .count();
+                    if still_there == 0 {
+                        ctx.step("the input notes are spent: the transaction was mined, the broadcaster's answer was lost");
+                        return Ok(json!({
+                            "transport": "legacy",
+                            "txHash": null,
+                            "outcome": "mined, answer lost",
+                            "broadcaster": quote.railgun_address,
+                            "fee": fee.to_string(),
+                        }));
+                    }
+                    ctx.step(format!("check {attempt}/4: {still_there} of {} input note(s) still unspent", inputs.len()));
+                }
+                let dropped = self
+                    .railgun
+                    .discard_pending_poi(&proved.proved_operations)
+                    .await
+                    .unwrap_or(0);
+                bail!(
+                    "the broadcaster never answered and, 80s later, the input notes are still \
+                     unspent: the transaction was not sent. Nothing was paid. {dropped} pending \
+                     POI entr{} dropped. {}",
+                    if dropped == 1 { "y" } else { "ies" },
+                    if delivery == Some(0) {
+                        "The request never left this tab: reload the page so its Waku node \
+                         reconnects, then retry."
+                    } else {
+                        "The request was delivered to the Waku network, so this broadcaster is \
+                         the silent party: it is left out of the draw for 10 minutes, retry to \
+                         use another one."
+                    }
+                )
+            }
             Err(e) => Err(e.into()),
         }
     }
@@ -1366,6 +1501,7 @@ impl Session {
             address: Some(address.to_string()),
             derivation: Some(self.derivation.to_string()),
             eoa: eoa.map(|a| a.to_string()),
+            eoa_source: self.eoa_source.clone(),
             eoa_balance,
             poi: self.railgun.poi_enabled(),
             poi_list_keys: self.railgun.poi_list_keys(),

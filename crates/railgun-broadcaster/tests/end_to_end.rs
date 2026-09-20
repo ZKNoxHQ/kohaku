@@ -236,7 +236,7 @@ async fn rate_ceiling_needs_no_trusted_signer() {
 async fn tab_round(bridge: &BrowserBridge, network: &dyn WakuTransport, connected: bool) {
     let received: Vec<WakuMessage> = network.poll().await.unwrap();
     let status = RemoteStatus { connected, peers: 3, detail: None };
-    for out in bridge.exchange(status, received) {
+    for out in bridge.exchange(status, received, Vec::new()) {
         network.publish(&out.content_topic, &out.payload).await.unwrap();
     }
 }
@@ -303,4 +303,60 @@ async fn required_poi_lists_must_be_ours() {
         client.best_quote(WETH, &[], None),
         Err(NoQuote::PoiListMismatch { .. })
     ));
+}
+
+#[tokio::test]
+async fn selection_spreads_over_near_cheapest_and_skips_the_silent_ones() {
+    let hub = MemoryHub::new();
+    let client = BroadcasterClient::new(Arc::new(hub.handle()), CHAIN);
+    let a = MockBroadcaster::new(Arc::new(hub.handle()), CHAIN, 7);
+    let b = MockBroadcaster::new(Arc::new(hub.handle()), CHAIN, 9);
+    let far = MockBroadcaster::new(Arc::new(hub.handle()), CHAIN, 11);
+    a.announce(&[(WETH, 860)], "a", 120_000).await;
+    b.announce(&[(WETH, 920)], "b", 120_000).await;
+    far.announce(&[(WETH, 1_400)], "far", 120_000).await;
+    client.pump().await.unwrap();
+
+    // Within 10% of 860 (946): a and b, never the expensive one, whatever the draw.
+    let ids = |pick: usize, exclude: &[String]| {
+        client
+            .select_quote(WETH, &[], None, 10, exclude, |n| {
+                assert!(n <= 2);
+                pick
+            })
+            .unwrap()
+            .fees_id
+    };
+    assert_eq!(ids(0, &[]), "a");
+    assert_eq!(ids(1, &[]), "b");
+    assert_eq!(ids(99, &[]), "b"); // an out-of-range draw is clamped
+
+    // a just timed out: only b is drawn. With everybody excluded, exclusions are ignored.
+    assert_eq!(ids(0, &[a.railgun_address.clone()]), "b");
+    let all = vec![a.railgun_address.clone(), b.railgun_address.clone(), far.railgun_address.clone()];
+    assert_eq!(ids(0, &all), "a");
+}
+
+#[tokio::test]
+async fn bridge_reports_what_happened_to_publishes() {
+    use railgun_broadcaster::PublishAck;
+    let bridge = BrowserBridge::new();
+    let up = RemoteStatus { connected: true, peers: 2, detail: None };
+    bridge.exchange(up.clone(), Vec::new(), Vec::new());
+    bridge.publish("/t", b"one").await.unwrap();
+    bridge.publish("/t", b"two").await.unwrap();
+
+    let out = bridge.exchange(up.clone(), Vec::new(), Vec::new());
+    assert_eq!(out.iter().map(|o| o.id).collect::<Vec<_>>(), vec![1, 2]);
+    bridge.exchange(
+        up,
+        Vec::new(),
+        vec![
+            PublishAck { id: 1, peers: 2, error: None },
+            PublishAck { id: 2, peers: 0, error: Some("light push refused by every peer".into()) },
+        ],
+    );
+    let stats = bridge.publish_stats();
+    assert_eq!((stats.queued, stats.delivered, stats.failed), (2, 1, 1));
+    assert_eq!(stats.last_error.as_deref(), Some("light push refused by every peer"));
 }

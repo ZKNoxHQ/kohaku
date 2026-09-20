@@ -4906,7 +4906,7 @@ dependencies = [
 
 [[package]]
 name = "railgun-broadcaster"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -4952,7 +4952,7 @@ dependencies = [
 
 [[package]]
 name = "railgun-wallet"
-version = "0.9.1"
+version = "0.9.5"
 dependencies = [
  "alloy",
  "anyhow",

@@ -183,6 +183,27 @@ impl BroadcasterClient {
             .best_quote(token, our_list_keys, max_rate, fees::now_ms())
     }
 
+    /// See [`FeeCache::select_quote`]. `pick(n)` returns an index below `n`.
+    pub fn select_quote(
+        &self,
+        token: &str,
+        our_list_keys: &[String],
+        max_rate: Option<u128>,
+        within_percent: u32,
+        exclude: &[String],
+        pick: impl FnOnce(usize) -> usize,
+    ) -> Result<FeeQuote, NoQuote> {
+        self.cache.lock().unwrap().select_quote(
+            token,
+            our_list_keys,
+            max_rate,
+            within_percent,
+            exclude,
+            pick,
+            fees::now_ms(),
+        )
+    }
+
     pub fn all_quotes(&self) -> Vec<FeeQuote> {
         self.cache.lock().unwrap().all(fees::now_ms())
     }

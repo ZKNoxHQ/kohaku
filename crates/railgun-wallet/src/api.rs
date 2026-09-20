@@ -127,13 +127,25 @@ struct ExchangeBody {
     detail: Option<String>,
     #[serde(default)]
     messages: Vec<ExchangeMessage>,
+    /// Outcome of the publishes handed out at earlier exchanges.
+    #[serde(default)]
+    acks: Vec<ExchangeAck>,
+}
+
+#[derive(Deserialize)]
+struct ExchangeAck {
+    id: u64,
+    #[serde(default)]
+    peers: usize,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 /// Round trip with the Waku node of the wallet tab: takes what it received, returns what it must
 /// publish. Payloads are opaque here, fee messages are authenticated further down.
 async fn waku_exchange(State(state): State<AppState>, Json(body): Json<ExchangeBody>) -> Response {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use railgun_broadcaster::{RemoteStatus, transport::WakuMessage};
+    use railgun_broadcaster::{PublishAck, RemoteStatus, transport::WakuMessage};
 
     let received = body
         .messages
@@ -156,9 +168,17 @@ async fn waku_exchange(State(state): State<AppState>, Json(body): Json<ExchangeB
                 detail: body.detail,
             },
             received,
+            body.acks
+                .into_iter()
+                .map(|a| PublishAck {
+                    id: a.id,
+                    peers: a.peers,
+                    error: a.error,
+                })
+                .collect(),
         )
         .into_iter()
-        .map(|o| json!({ "contentTopic": o.content_topic, "payload": STANDARD.encode(&o.payload) }))
+        .map(|o| json!({ "id": o.id, "contentTopic": o.content_topic, "payload": STANDARD.encode(&o.payload) }))
         .collect();
     Json(json!({ "publish": publish })).into_response()
 }
@@ -166,6 +186,7 @@ async fn waku_exchange(State(state): State<AppState>, Json(body): Json<ExchangeB
 /// Non-secret defaults the front prefills the unlock form with.
 async fn defaults() -> Response {
     Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
         "waku": {
             "clusterId": railgun_broadcaster::wire::CLUSTER_ID,
             "shardId": railgun_broadcaster::wire::SHARD_ID,

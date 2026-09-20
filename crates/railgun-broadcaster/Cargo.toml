@@ -1,6 +1,6 @@
 [package]
 name = "railgun-broadcaster"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 description = "Client for the Railgun community broadcaster network (Waku transport)"
 publish = false

@@ -124,7 +124,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
 </head>
 <body>
 <header class="bar">
-  <h1>Railgun wallet</h1>
+  <h1>Railgun wallet <span class="meta" id="app-version"></span></h1>
   <span class="meta" id="hdr-meta">locked</span>
   <span class="spacer"></span>
   <label class="check" style="margin:0"><input type="checkbox" id="auto-sync"> sync every minute</label>
@@ -176,9 +176,9 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
       </div>
     </details>
 
-    <label for="f-eoa">Public account private key (pays gas for shielding)</label>
+    <label for="f-eoa">Public account private key (optional)</label>
     <input type="password" id="f-eoa" autocomplete="off" placeholder="0x…">
-    <p class="hint">Optional. Without it the wallet can sync, transfer and unshield over 4337, but cannot shield.</p>
+    <p class="hint">Leave empty to use the Ethereum account of the same phrase (m/44'/60'/0'/0/index, as MetaMask or Ledger Live derive it). It pays the gas for shielding. A key entered here replaces it. The accounts of the test phrase are public too: anything sent to them can be taken by anyone.</p>
 
     <div class="row">
       <div><label for="f-bundler">Bundler URL (4337)</label><input type="text" id="f-bundler" autocomplete="off"></div>
@@ -238,7 +238,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
         <section>
           <h2>Proofs of innocence waiting for submission</h2>
           <div id="poi"></div>
-          <p class="hint">Each private transaction needs a follow-up proof before its change notes become spendable. Proofs are generated and submitted during sync, once the transaction is indexed. Transactions made before this wallet was opened here, or with another wallet, are detected and proved the same way.</p>
+          <p class="hint">Each private transaction needs a follow-up proof before its change notes become spendable. Proofs are generated and submitted during sync, once the transaction is indexed. Transactions made before this wallet was opened here, or with another wallet, are detected and proved the same way. An entry whose transaction never reached the chain (a relayer that did not answer) is removed at the first sync 15 minutes after the proof.</p>
         </section>
       </div>
 
@@ -337,7 +337,7 @@ const h = (tag, attrs, ...kids) => {
   return el;
 };
 
-const state = { transportUsable: false, legacy: null, status: null, activeJob: null, transport: null, action: "shield", logSeq: 0, lastAutoSync: 0 };
+const state = { broadcaster: null, transportUsable: false, legacy: null, status: null, activeJob: null, transport: null, action: "shield", logSeq: 0, lastAutoSync: 0 };
 const PREFS = ["f-chain", "f-rpc", "f-derivation", "f-index", "f-bundler", "f-waku", "f-wakumode", "f-trusted"];
 const DEFAULTS = {
   "1": { rpc: "https://ethereum-rpc.publicnode.com", bundler: "https://public.pimlico.io/v2/1/rpc" },
@@ -459,6 +459,7 @@ function feeLimits() {
     maxFeeRate: $("l-rate").value.trim() || null, maxFee: $("l-maxfee").value.trim() || null,
     singleProof: $("aa-single").checked, gasMarginPercent: Number($("aa-margin").value) || null,
     singleProofStrict: $("aa-strict").checked,
+    broadcaster: state.broadcaster,
   };
 }
 
@@ -482,15 +483,21 @@ function renderLegacy(s) {
     : `Waku node ${l.wakuUrl || ""} unreachable: ${l.error || "no answer"}. Start nwaku on the Railgun shard (see the README) to use the legacy transport.`;
   const q = $("legacy-quotes"); q.replaceChildren();
   if (state.transport !== "legacy" || !usable.length) return;
-  const table = h("table", {}, h("tr", {}, h("th", { text: "Broadcaster" }), h("th", { class: "num", text: "Rate (× gas cost)" }), h("th", { class: "num", text: "Reliability" }), h("th", { class: "num", text: "Expires in" })));
+  const table = h("table", {}, h("tr", {}, h("th", { text: "" }), h("th", { text: "Broadcaster" }), h("th", { class: "num", text: "Rate (× gas cost)" }), h("th", { class: "num", text: "Reliability" }), h("th", { class: "num", text: "Expires in" })));
   for (const x of [...usable].sort((a, b) => (BigInt(a.feePerUnitGas) < BigInt(b.feePerUnitGas) ? -1 : 1)).slice(0, 6)) {
+    const pickBtn = h("button", { class: "quiet", text: state.broadcaster === x.railgunAddress ? "chosen" : "use" });
+    pickBtn.addEventListener("click", () => { state.broadcaster = state.broadcaster === x.railgunAddress ? null : x.railgunAddress; render(); });
     table.append(h("tr", {},
+      h("td", {}, pickBtn),
       h("td", { class: "addr", text: `${x.railgunAddress.slice(0, 12)}…${x.railgunAddress.slice(-4)}${x.identifier ? " (" + x.identifier + ")" : ""}` }),
       h("td", { class: "num" }, timesGas(x.feePerUnitGas) + " ", underCeiling(x) ? "" : h("span", { class: "tag bad", text: "over ceiling" })),
       h("td", { class: "num", text: String(x.reliability) }),
       h("td", { class: "num", text: Math.max(0, Math.round((x.expiration - Date.now()) / 1000)) + "s" })));
   }
   q.append(table);
+  q.append(h("p", { class: "hint", text: state.broadcaster
+    ? "Requests go to the chosen broadcaster. Click it again to go back to the draw."
+    : "Without a choice, one offer is drawn among those within 10% of the cheapest; a broadcaster that stayed silent is left out for 10 minutes." }));
 }
 
 // Why the legacy transport cannot be used right now, and what to do about it. Empty when usable.
@@ -572,7 +579,7 @@ function render() {
   $("hdr-meta").textContent = `${chain}, synced to block ${s.syncedBlock ?? "?"}, keys: ${s.derivation}` + (busy ? `, running ${state.activeJob.kind}` : "");
   $("zk-addr").textContent = s.address;
   $("eoa-addr").textContent = s.eoa || "none (shielding disabled)";
-  $("eoa-bal").textContent = s.eoaBalance != null ? `${s.eoaBalance} native` : "";
+  $("eoa-bal").textContent = [s.eoaBalance != null ? `${s.eoaBalance} native` : null, s.eoaSource].filter(Boolean).join(", ");
   $("btn-shield").disabled = busy || !s.eoa;
   renderBalances(s); renderNotes(s); renderPoi(s); renderTransports(s); renderLegacy(s);
   $("btn-transfer").disabled = busy || !state.transportUsable;
@@ -668,7 +675,7 @@ const b64 = {
   dec(text) { const s = atob(text); const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i); return out; },
 };
 const tab = {
-  config: null, chainId: null, inbox: [], status: { state: "stopped", peers: 0, error: null }, timer: null, loading: null, lastSendError: null,
+  config: null, chainId: null, inbox: [], acks: [], status: { state: "stopped", peers: 0, error: null }, timer: null, loading: null, lastSendError: null,
   note() {
     const st = this.status;
     const text = { stopped: "The Waku node of this tab is stopped.", loading: "Loading the Waku node.", starting: "The Waku node of this tab is starting.",
@@ -707,13 +714,14 @@ const tab = {
   async exchange() {
     const st = window.RailgunWaku ? { ...this.status, peers: window.RailgunWaku.status().peers } : this.status;
     const messages = this.inbox.splice(0);
+    const acks = this.acks.splice(0);
     try {
-      const { publish } = await api("/api/waku/exchange", { connected: st.state === "connected", peers: st.peers || 0, detail: st.error ? `${st.state}: ${st.error}` : st.state, messages });
+      const { publish } = await api("/api/waku/exchange", { connected: st.state === "connected", peers: st.peers || 0, detail: st.error ? `${st.state}: ${st.error}` : st.state, messages, acks });
       for (const p of publish) {
-        try { await window.RailgunWaku.send(p.contentTopic, b64.dec(p.payload)); this.lastSendError = null; }
-        catch (e) { this.lastSendError = e && e.message ? e.message : String(e); }
+        try { const peers = await window.RailgunWaku.send(p.contentTopic, b64.dec(p.payload)); this.lastSendError = null; this.acks.push({ id: p.id, peers }); }
+        catch (e) { this.lastSendError = e && e.message ? e.message : String(e); this.acks.push({ id: p.id, peers: 0, error: this.lastSendError }); }
       }
-    } catch { this.inbox.unshift(...messages); }
+    } catch { this.inbox.unshift(...messages); this.acks.unshift(...acks); }
   },
   async stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -730,6 +738,8 @@ loadPrefs();
 syncWakuModeField();
 resetUnlockForm();
 api("/api/defaults").then((d) => {
+  $("app-version").textContent = "v" + d.version;
+  document.title = "Railgun wallet v" + d.version;
   if (!$("f-trusted").value.trim()) $("f-trusted").value = d.trustedFeeSigners.join("\n");
 }).catch(() => {});
 $("f-chain").addEventListener("change", applyDefaults);

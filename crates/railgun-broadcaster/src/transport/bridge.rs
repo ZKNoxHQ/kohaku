@@ -28,8 +28,29 @@ const MAX_INBOX: usize = 2_000;
 
 #[derive(Debug, Clone)]
 pub struct Outbound {
+    /// Echoed back in the [`PublishAck`].
+    pub id: u64,
     pub content_topic: String,
     pub payload: Vec<u8>,
+}
+
+/// Outcome of one publish, reported by the remote node at the next exchange.
+#[derive(Debug, Clone)]
+pub struct PublishAck {
+    pub id: u64,
+    /// Peers that accepted the light push. Zero with an `error` when none did.
+    pub peers: usize,
+    pub error: Option<String>,
+}
+
+/// What happened to the publishes handed to the remote node. Without it, a request that never
+/// left the tab looks exactly like a broadcaster that does not answer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublishStats {
+    pub queued: u64,
+    pub delivered: u64,
+    pub failed: u64,
+    pub last_error: Option<String>,
 }
 
 /// What the remote node says about itself at each exchange.
@@ -48,6 +69,8 @@ struct State {
     outbox: VecDeque<(Instant, Outbound)>,
     last_exchange: Option<Instant>,
     remote: RemoteStatus,
+    next_id: u64,
+    stats: PublishStats,
 }
 
 #[derive(Default)]
@@ -61,10 +84,25 @@ impl BrowserBridge {
     }
 
     /// One round trip with the remote node: stores `received`, returns what it must publish.
-    pub fn exchange(&self, status: RemoteStatus, received: Vec<WakuMessage>) -> Vec<Outbound> {
+    pub fn exchange(
+        &self,
+        status: RemoteStatus,
+        received: Vec<WakuMessage>,
+        acks: Vec<PublishAck>,
+    ) -> Vec<Outbound> {
         let mut state = self.state.lock().unwrap();
         state.last_exchange = Some(Instant::now());
         state.remote = status;
+        for ack in acks {
+            match ack.error {
+                None if ack.peers > 0 => state.stats.delivered += 1,
+                error => {
+                    state.stats.failed += 1;
+                    state.stats.last_error =
+                        Some(error.unwrap_or_else(|| "no peer accepted the message".into()));
+                }
+            }
+        }
         state.inbox.extend(received);
         let overflow = state.inbox.len().saturating_sub(MAX_INBOX);
         if overflow > 0 {
@@ -77,6 +115,11 @@ impl BrowserBridge {
             .filter(|(queued, _)| now.duration_since(*queued) <= OUTBOUND_TTL)
             .map(|(_, message)| message)
             .collect()
+    }
+
+    /// Counters since the bridge was created; compare two readings around a send.
+    pub fn publish_stats(&self) -> PublishStats {
+        self.state.lock().unwrap().stats.clone()
     }
 
     fn link(&self) -> Result<(), TransportError> {
@@ -114,9 +157,14 @@ impl WakuTransport for BrowserBridge {
 
     async fn publish(&self, content_topic: &str, payload: &[u8]) -> Result<(), TransportError> {
         self.link()?;
-        self.state.lock().unwrap().outbox.push_back((
+        let mut state = self.state.lock().unwrap();
+        state.next_id += 1;
+        state.stats.queued += 1;
+        let id = state.next_id;
+        state.outbox.push_back((
             Instant::now(),
             Outbound {
+                id,
                 content_topic: content_topic.to_string(),
                 payload: payload.to_vec(),
             },

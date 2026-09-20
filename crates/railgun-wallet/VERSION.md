@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.9.5 (2026-09-20)
+
+* Pending POI entries of operations that never reached the chain are dropped at sync (SDK fork:
+  `PoiProvider::prune_unmined`). Rule: a mined operation nullifies all its inputs, so an entry
+  with an input still unspent, 15 minutes or more after the proof, was not sent. Entries written
+  before the timestamp existed count as old, which clears the orphans left by the legacy
+  time-outs of versions before 0.9.2. The clean-up of 0.9.2 only covered the operation that had
+  just timed out.
+* Nothing to clean on the POI node: an entry is only submitted once its txid is validated in the
+  txid tree, so an unmined operation never left the wallet.
+* The front hint under the pending list says so.
+
+## 0.9.4 (2026-09-20)
+
+Legacy requests going unanswered. No change since the validated 0.7.x touches the sealing,
+publishing or response path, so this release makes the failure observable and removes the two
+weaknesses that fit the symptom.
+
+* Every publish is acknowledged by the tab (`acks` in `/api/waku/exchange`): on a time-out the
+  job now says how many publishes a Waku peer accepted, how many failed and why, and how many the
+  tab never acknowledged. A request that never left the tab and a broadcaster that stays silent
+  are no longer the same message, and the advice differs (reload the page, or use another
+  broadcaster).
+* Broadcaster selection follows the reference client: a draw among the offers within 10% of the
+  cheapest, instead of always the cheapest, which sent every request to the same broadcaster
+  (reliability 0.62 on Sepolia). A broadcaster that stayed silent although the request was
+  delivered is left out of the draw for 10 minutes.
+* A broadcaster can be chosen by hand in the offers table ("use"), to test each one.
+
+## 0.9.3 (2026-09-20)
+
+* The wallet version is shown in the header and the page title (`version` in `/api/defaults`).
+* The public account is derived from the recovery phrase when no key is given: BIP-44
+  `m/44'/60'/0'/0/<index>`, same index as the Railgun keys, checked against the hardhat phrase
+  (accounts 0 and 1). Its address, balance and derivation path are shown; an imported key still
+  takes precedence and is labelled as such. With raw Railgun keys and no phrase there is no
+  public account, as before.
+
+## 0.9.2 (2026-09-20)
+
+* Legacy: a broadcaster that does not answer within 120 s no longer ends the job on "may have
+  been sent". The wallet syncs up to four times over 80 s and looks at the input notes: spent
+  means mined (answer lost), still unspent means not sent. In the second case the pending POI
+  entries of the proof are dropped (SDK fork: `RailgunProvider::discard_pending_poi`), since
+  their txid will never be validated; `recover_missing` rebuilds them if the transaction lands
+  later after all.
+* "Prove once" validated on Sepolia with the simulated limits (0.9.1). Calibration from that
+  run: the probe measured 1,393,206 gas of paymaster validation, the estimate on the real proof
+  asked for a limit of 1,507,574 (+8.2%, the 63/64 forwarding rule over four nested calls), the
+  25% margin allowed 1,750,000.
+
 ## 0.9.1 (2026-09-20)
 
 * Fix: "prove once" stopped after the proof with `account verification needs 51698, limit is

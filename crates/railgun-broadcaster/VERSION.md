@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 (2026-09-20)
+
+* `BrowserBridge`: publishes carry an id and are acknowledged (`PublishAck`), with counters in
+  `publish_stats()`. `exchange` takes the acknowledgements.
+* `select_quote`: draw among the offers within a percentage of the cheapest, with an exclusion
+  list that is ignored when nobody else is left (`findRandomBroadcasterForToken` of the reference
+  client). `best_quote` is unchanged.
+
 ## 0.4.1 (2026-09-20)
 
 * `NoQuote::PoiListMismatch`: offers exist but require POI lists the caller does not prove

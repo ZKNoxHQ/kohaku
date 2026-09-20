@@ -128,6 +128,18 @@ fn parse_hardened_path(path: &str) -> Result<Vec<u32>> {
         .collect()
 }
 
+/// BIP-44 path of the Ethereum account at `index`, the one MetaMask, Ledger Live and Railway use.
+pub fn ethereum_path(index: u32) -> String {
+    format!("m/44'/60'/0'/0/{index}")
+}
+
+/// Private key of the Ethereum account derived from the same phrase, at [`ethereum_path`].
+pub fn derive_ethereum_key(mnemonic: &str, index: u32) -> Result<[u8; 32]> {
+    let mnemonic = bip39::Mnemonic::parse_normalized(mnemonic.trim())
+        .map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
+    bip32_derive(&mnemonic.to_seed(""), &ethereum_path(index))
+}
+
 fn bip32_derive(seed: &[u8], path: &str) -> Result<[u8; 32]> {
     let path = bip32::DerivationPath::from_str(path).map_err(|e| anyhow!("bad path: {e}"))?;
     let xprv = bip32::XPrv::derive_from_path(seed, &path).map_err(|e| anyhow!("bip32: {e}"))?;
@@ -152,6 +164,20 @@ mod tests {
             signer.address().to_string(),
             "0zk1qyk9nn28x0u3rwn5pknglda68wrn7gw6anjw8gg94mcj6eq5u48tlrv7j6fe3z53lama02nutwtcqc979wnce0qwly4y7w4rls5cq040g7z8eagshxrw5ajy990"
         );
+    }
+
+    /// The hardhat / anvil phrase: account 0 and 1 are known to every Ethereum developer.
+    #[test]
+    fn ethereum_account_matches_the_standard_derivation() {
+        use alloy::signers::local::PrivateKeySigner as Eoa;
+        let address = |i| {
+            Eoa::from_bytes(&derive_ethereum_key(TEST_MNEMONIC, i).unwrap().into())
+                .unwrap()
+                .address()
+                .to_string()
+        };
+        assert_eq!(address(0), "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+        assert_eq!(address(1), "0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
     }
 
     #[test]

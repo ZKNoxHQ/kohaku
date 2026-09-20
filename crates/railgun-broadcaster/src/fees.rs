@@ -478,6 +478,45 @@ impl FeeCache {
         }
     }
 
+    /// Picks one offer among those within `within_percent` of the cheapest usable one, at
+    /// random, as the reference client does (`findRandomBroadcasterForToken`): always taking the
+    /// cheapest sends every request to the same broadcaster, however unreliable. `exclude` lists
+    /// 0zk addresses to skip, typically broadcasters that just failed to answer; they are used
+    /// again only if nobody else is left.
+    pub fn select_quote(
+        &self,
+        token: &str,
+        our_list_keys: &[String],
+        max_rate: Option<u128>,
+        within_percent: u32,
+        exclude: &[String],
+        pick: impl FnOnce(usize) -> usize,
+        now_ms: u64,
+    ) -> Result<FeeQuote, NoQuote> {
+        // Reports the right reason when nothing is usable at all.
+        self.best_quote(token, our_list_keys, max_rate, now_ms)?;
+        let ceiling = max_rate.unwrap_or(u128::MAX);
+        let usable: Vec<FeeQuote> = self
+            .quotes_for(token, our_list_keys, now_ms)
+            .into_iter()
+            .filter(|q| q.fee_per_unit_gas <= ceiling)
+            .collect();
+        let preferred: Vec<FeeQuote> = usable
+            .iter()
+            .filter(|q| !exclude.contains(&q.railgun_address))
+            .cloned()
+            .collect();
+        let pool = if preferred.is_empty() { usable } else { preferred };
+        let cheapest = pool[0].fee_per_unit_gas;
+        let threshold = cheapest.saturating_add(cheapest / 100 * u128::from(within_percent));
+        let eligible: Vec<FeeQuote> = pool
+            .into_iter()
+            .filter(|q| q.fee_per_unit_gas <= threshold)
+            .collect();
+        let index = pick(eligible.len()).min(eligible.len() - 1);
+        Ok(eligible[index].clone())
+    }
+
     pub fn all(&self, now_ms: u64) -> Vec<FeeQuote> {
         let mut quotes: Vec<FeeQuote> = self
             .quotes

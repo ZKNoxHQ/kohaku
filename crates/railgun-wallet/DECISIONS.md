@@ -228,3 +228,17 @@ from. It depends on the EntryPoint version only, is small next to the paymaster 
 (60k of about 2M gas, 3% of the fee), and the bundler's estimate is still compared after the
 proof. It differs in kind from the removed profiles: those were per shape and per chain, and
 could be absent.
+
+## ADR-019: a time-out must say which side failed
+
+With the Waku node in the tab, the daemon only queued publishes: whether light push succeeded was
+known to the page alone. Every failure then surfaced as "the broadcaster did not answer", which
+hides three different things: the request never left, the broadcaster ignored it, or its answer
+was lost. The first is now told by acknowledgements, the last by the input notes on-chain
+(0.9.2), and what remains is the broadcaster. Only that case penalises the broadcaster.
+
+Always picking the cheapest offer was a mistake of the first version: with two offers a few
+percent apart, every request went to the less reliable one. The draw within 10% is the reference
+behaviour. No automatic retry on another broadcaster: the fee note is addressed to the
+broadcaster, so a retry is a new proof and, with a hardware signer, a new signature the user has
+to approve.

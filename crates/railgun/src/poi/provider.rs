@@ -90,6 +90,23 @@ pub struct PendingPoiEntry {
     pub token_hash: U256,
     pub has_unshield: bool,
     pub list_keys: Vec<ListKey>,
+    /// ZKNOX fork: seconds since the epoch when the entry was queued, 0 for entries written
+    /// before the field existed. Used to tell an operation still in flight from one that never
+    /// reached the chain.
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+/// ZKNOX fork: how long a proved operation may stay unmined before its pending POI is dropped.
+/// Relayer quotes last a few minutes; past this, a transaction whose inputs are still unspent
+/// was not sent.
+const UNMINED_GRACE_SECS: u64 = 15 * 60;
+
+fn now_secs() -> u64 {
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// ZKNOX fork: non-sensitive view of a [`PendingPoiEntry`] for UIs.
@@ -157,6 +174,14 @@ impl PoiProvider {
         let poi_client = self.poi_client.clone();
         self.txid_indexer.sync_to(to_block, &poi_client).await?;
 
+        let dropped = self.prune_unmined(accounts);
+        if dropped > 0 {
+            info!(
+                "Dropped {dropped} pending POI entr{} of operations that never reached the chain",
+                if dropped == 1 { "y" } else { "ies" }
+            );
+        }
+
         let recovered = self.recover_missing(accounts).await;
         if recovered > 0 {
             info!("Queued {recovered} past operation(s) for POI proof generation");
@@ -177,6 +202,24 @@ impl PoiProvider {
         }
         self.save().await?;
         Ok(())
+    }
+
+    /// ZKNOX fork: drops the pending entries of operations that were proved but never reached
+    /// the chain (a relayer that did not answer). Their txid will never be validated, so they
+    /// would be retried, and fail, at every sync. Should the transaction land later after all,
+    /// `recover_missing` rebuilds the entry from chain data.
+    pub async fn discard_ops(
+        &mut self,
+        operations: &[ProvedOperation],
+    ) -> Result<usize, PoiProviderError> {
+        let txids: Vec<Txid> = operations.iter().map(Txid::from_operation).collect();
+        let before = self.inner.pending.len();
+        self.inner.pending.retain(|e| !txids.contains(&e.txid));
+        let removed = before - self.inner.pending.len();
+        if removed > 0 {
+            self.save().await?;
+        }
+        Ok(removed)
     }
 
     /// ZKNOX fork: summaries of pending POI submissions.
@@ -222,6 +265,23 @@ impl PoiProvider {
             worst = worst.max(status);
         }
         Ok(worst)
+    }
+
+    /// ZKNOX fork: drops pending entries of operations that were proved but never mined.
+    ///
+    /// A mined operation nullifies every one of its inputs. So, once the UTXO indexer is synced,
+    /// an entry with an input still unspent is not on-chain; past the grace period it will not
+    /// be, because the relayer's quote has expired. Such an entry can never be submitted (its
+    /// txid is in no tree) and would be retried at every sync. The POI node never saw it: nothing
+    /// is sent before the txid is validated, so there is nothing to clean up remotely. If the
+    /// transaction does land later, `recover_missing` rebuilds the entry from chain data.
+    fn prune_unmined(&mut self, accounts: &[RecoveryAccount]) -> usize {
+        let now = now_secs();
+        let before = self.inner.pending.len();
+        self.inner
+            .pending
+            .retain(|entry| !never_mined(entry, accounts, now));
+        before - self.inner.pending.len()
     }
 
     /// ZKNOX fork: queues a POI proof for every past operation of `accounts` whose outputs
@@ -520,7 +580,28 @@ fn entry_from_op(op: &ProvedOperation, list_keys: Vec<ListKey>) -> PendingPoiEnt
         token_hash: op.inner.asset.hash(),
         has_unshield: op.inner.unshield_note().is_some(),
         list_keys,
+        created_at: now_secs(),
     }
+}
+
+/// ZKNOX fork: see `PoiProvider::prune_unmined`.
+fn never_mined(entry: &PendingPoiEntry, accounts: &[RecoveryAccount], now: u64) -> bool {
+    if now.saturating_sub(entry.created_at) < UNMINED_GRACE_SECS {
+        return false;
+    }
+    // Only judge entries of an account we track: its unspent set is what proves it.
+    let Some(account) = accounts
+        .iter()
+        .find(|a| a.spending_pubkey == entry.spending_pubkey)
+    else {
+        return false;
+    };
+    entry.in_notes.iter().any(|input| {
+        account
+            .unspent
+            .iter()
+            .any(|n| n.tree_number == input.tree_number && n.leaf_index == input.leaf_index)
+    })
 }
 
 /// ZKNOX fork: rebuilds the pending entry of `op` if `account` owns every input and every
@@ -586,6 +667,7 @@ fn recovery_entry(
         token_hash,
         has_unshield: op.has_unshield,
         list_keys: list_keys.to_vec(),
+        created_at: now_secs(),
     })
 }
 
@@ -611,4 +693,70 @@ fn blinded_commitments(
         blinded_commitments_out.push(blinded_commitment);
     }
     blinded_commitments_out
+}
+
+
+#[cfg(test)]
+mod prune_tests {
+    use alloy::primitives::address;
+    use rand::random;
+
+    use super::*;
+    use crate::{
+        account::signer::{PrivateKeySigner, RailgunSigner},
+        caip::AssetId,
+        poi::types::BlindedCommitmentType,
+    };
+
+    #[test]
+    fn an_entry_with_an_unspent_input_was_never_mined() {
+        let signer = PrivateKeySigner::new_evm(random(), random(), 1);
+        let asset = AssetId::erc20(address!("0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"));
+        let note = |leaf| {
+            UtxoNote::new(0, leaf, signer.clone(), asset, 10, random(), "", BlindedCommitmentType::Shield)
+        };
+        let entry = |created_at| PendingPoiEntry {
+            txid: Txid::new(&[], &[], U256::ZERO),
+            spending_pubkey: signer.spending_key().public_key(),
+            nullifying_key: signer.viewing_key().nullifying_key(),
+            utxo_tree_in: 0,
+            bound_params_hash: U256::ZERO,
+            in_notes: vec![note(4), note(5)],
+            out_commitments: vec![],
+            out_npks: vec![],
+            out_values: vec![],
+            token_hash: U256::ZERO,
+            has_unshield: false,
+            list_keys: vec![],
+            created_at,
+        };
+        let account = |unspent: Vec<UtxoNote>| RecoveryAccount {
+            spending_pubkey: signer.spending_key().public_key(),
+            nullifying_key: signer.viewing_key().nullifying_key(),
+            unspent,
+            spent: vec![],
+            sent: vec![],
+        };
+        let now = 10_000_000;
+        let old = now - UNMINED_GRACE_SECS - 1;
+
+        // One input still unspent, long after the proof: never sent.
+        assert!(never_mined(&entry(old), &[account(vec![note(5), note(9)])], now));
+        // Entries written before the timestamp existed count as old.
+        assert!(never_mined(&entry(0), &[account(vec![note(4)])], now));
+        // Both inputs gone: mined, the proof is due.
+        assert!(!never_mined(&entry(old), &[account(vec![note(9)])], now));
+        // Just proved, maybe in a relayer's hands: wait.
+        assert!(!never_mined(&entry(now - 60), &[account(vec![note(4), note(5)])], now));
+        // Not one of our accounts: no evidence, keep.
+        let stranger = PrivateKeySigner::new_evm(random(), random(), 1);
+        let other = RecoveryAccount {
+            spending_pubkey: stranger.spending_key().public_key(),
+            nullifying_key: stranger.viewing_key().nullifying_key(),
+            unspent: vec![note(4)],
+            spent: vec![],
+            sent: vec![],
+        };
+        assert!(!never_mined(&entry(old), &[other], now));
+    }
 }

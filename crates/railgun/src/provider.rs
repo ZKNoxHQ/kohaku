@@ -182,6 +182,18 @@ impl RailgunProvider {
         self.poi_provider.is_some()
     }
 
+    /// Forgets the pending POI proofs of operations that never reached the chain. Returns how
+    /// many entries were dropped.
+    pub async fn discard_pending_poi(
+        &mut self,
+        operations: &[ProvedOperation],
+    ) -> Result<usize, RailgunProviderError> {
+        match &mut self.poi_provider {
+            Some(p) => Ok(p.discard_ops(operations).await?),
+            None => Ok(0),
+        }
+    }
+
     /// POI list keys this provider proves against, empty when POI is off.
     pub fn poi_list_keys(&self) -> Vec<String> {
         self.poi_provider

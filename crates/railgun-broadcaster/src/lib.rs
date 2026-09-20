@@ -26,6 +26,6 @@ pub use fees::{
 };
 pub use transport::{
     WakuTransport,
-    bridge::{BrowserBridge, Outbound, RemoteStatus},
+    bridge::{BrowserBridge, Outbound, PublishAck, PublishStats, RemoteStatus},
     nwaku_rest::NwakuRest,
 };

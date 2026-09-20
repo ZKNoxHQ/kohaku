@@ -42,6 +42,8 @@ pub struct StatusSnapshot {
     pub address: Option<String>,
     pub derivation: Option<String>,
     pub eoa: Option<String>,
+    /// Where the public account comes from: a derivation path, or "imported key".
+    pub eoa_source: Option<String>,
     pub eoa_balance: Option<String>,
     pub poi: bool,
     /// POI lists this session proves against; broadcasters requiring another are unusable.
