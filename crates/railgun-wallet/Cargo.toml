@@ -1,0 +1,35 @@
+[package]
+name = "railgun-wallet"
+version = "0.7.2"
+edition = "2024"
+description = "ZKNOX local Railgun wallet (daemon + web front) built on the kohaku Rust SDK"
+publish = false
+
+[[bin]]
+name = "railgun-wallet"
+path = "src/main.rs"
+
+[dependencies]
+alloy = { workspace = true, default-features = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+base64 = "0.22"
+bip32 = { version = "0.5", default-features = false, features = ["secp256k1", "std"] }
+bip39 = { version = "2", default-features = false, features = ["std"] }
+eip-1193-provider = { workspace = true }
+hex = { workspace = true }
+hmac = "0.12"
+kohaku-db = { workspace = true }
+railgun = { workspace = true }
+railgun-broadcaster = { path = "../railgun-broadcaster" }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+userop-kit = { workspace = true }
+

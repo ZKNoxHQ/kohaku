@@ -9,6 +9,8 @@ members = [
     "crates/poseidon-rust",
     "crates/railgun",
     "crates/railgun-ts",
+    "crates/railgun-broadcaster",
+    "crates/railgun-wallet",
     "crates/tornadocash",
     "crates/userop-kit",
     "crates/userop-kit-ts",
