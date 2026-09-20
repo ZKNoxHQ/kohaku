@@ -22,7 +22,11 @@ use alloy::{
 
 use crate::{signable_user_operation::SignableUserOperation, user_operation::Authorization};
 
+pub mod alto;
+
 /// Runtime bytecode of `ValidationProbe.sol` (solc 0.8.28, optimizer 200 runs, via-IR, cancun).
+/// Rebuild with solc after any change to the source, and keep the two files in step: the test
+/// below only checks the selector.
 /// No constructor, no immutable, no storage: valid as overridden code at any address.
 pub const PROBE_RUNTIME_CODE: &str = include_str!("ValidationProbe.bin-runtime");
 
@@ -50,6 +54,7 @@ sol! {
         bool postOpCalled;
         bytes paymasterError;
         bytes callError;
+        uint256 callGasLimit;
     }
 
     function probe(ProbedUserOperation op, bytes32 userOpHash, uint256 maxCost)
@@ -78,7 +83,13 @@ pub struct ProbeRequest {
 pub struct ProbeGas {
     pub account_validation: u128,
     pub paymaster_validation: u128,
+    /// Gas the execution call used. Informative: use [`Self::call_limit`] to size the limit.
     pub call: u128,
+    /// Smallest `callGasLimit` with which the execution call succeeds, found by the probe by
+    /// trial (each trial reverted) to within 1000 gas. Well above the gas used whenever value
+    /// moves: a transfer must have 9000 gas at hand, 34000 towards a new account, and hands most
+    /// of it back. 0 without execution calldata.
+    pub call_limit: u128,
     pub post_op: u128,
     pub post_op_called: bool,
 }
@@ -93,6 +104,8 @@ pub enum ProbeError {
     PaymasterValidation(String),
     #[error("the execution phase reverted in the probe: {0}")]
     Call(String),
+    #[error("the probe found no gas limit under which the execution phase succeeds")]
+    CallLimit,
 }
 
 /// Builds the probe request for an unsigned UserOperation (its dummy signature is used).
@@ -149,11 +162,15 @@ pub fn decode(answer: &[u8], has_call: bool) -> Result<ProbeGas, ProbeError> {
     if has_call && !r.callSucceeded {
         return Err(ProbeError::Call(revert_text(&r.callError)));
     }
+    if has_call && r.callGasLimit.is_zero() {
+        return Err(ProbeError::CallLimit);
+    }
     let gas = |v: U256| u128::try_from(v).unwrap_or(u128::MAX);
     Ok(ProbeGas {
         account_validation: gas(r.accountValidationGas),
         paymaster_validation: gas(r.paymasterValidationGas),
         call: gas(r.callGas),
+        call_limit: gas(r.callGasLimit),
         post_op: gas(r.postOpGas),
         post_op_called: r.postOpCalled,
     })
@@ -263,8 +280,11 @@ mod tests {
             postOpCalled: false,
             paymasterError: Bytes::new(),
             callError: Bytes::new(),
+            callGasLimit: U256::ZERO,
         };
         let gas = decode(&ok.abi_encode(), false).unwrap();
+        // With execution calldata, a search that found nothing is an error, not a zero limit.
+        assert!(matches!(decode(&ok.abi_encode(), true), Err(ProbeError::CallLimit)));
         assert_eq!(gas.paymaster_validation, 900_000);
         assert!(!gas.post_op_called);
 

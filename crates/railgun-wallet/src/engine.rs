@@ -33,7 +33,7 @@ use railgun::{
     caip::AssetId,
     chain_config::ChainConfig,
     provider::RailgunProvider,
-    transact::TransactionBuilder,
+    transact::{RelayAction, TransactionBuilder},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -816,10 +816,20 @@ impl Session {
             bail!("native unshield only applies to the wrapped base token");
         }
         if transport != Transport::Erc4337 {
-            bail!(
-                "native unshield is only wired for the 4337 transport (the direct path would need \
-                 RelayAdapt, not implemented in the SDK yet). Unshield the wrapped token instead."
-            );
+            // Legacy and direct: the transaction unshields the wrapped token to the RelayAdapt
+            // contract, which unwraps its whole balance and forwards the native currency in the
+            // same EVM transaction (RelayAdapt.relay). The recipient and the unwrap are bound
+            // into the proofs through adaptParams: whoever submits carries bytes it cannot alter.
+            let relay_adapt = self.chain.relay_adapt_contract;
+            let mut action = RelayAction::unshield_base_token(relay_adapt, to, &mut rand::rng());
+            // As the community engine: all or nothing when we send it ourselves; through a
+            // broadcaster the Railgun transaction must land even if a call fails, since the
+            // fee is paid either way.
+            action.require_success = transport == Transport::Direct;
+            let builder = TransactionBuilder::new()
+                .unshield(signer, relay_adapt, asset_id, value)?
+                .relay(action);
+            return self.submit(ctx, builder, transport, Vec::new(), None).await;
         }
 
         // The wrapped token lands on the ephemeral 7702 sender, which unwraps it and forwards the
@@ -860,8 +870,8 @@ impl Session {
             Transport::Legacy => {
                 if !calls.is_empty() {
                     bail!(
-                        "native unshield over the legacy transport needs RelayAdapt, which the \
-                         SDK does not build yet. Unshield the wrapped token, or use 4337."
+                        "the legacy transport runs post-transaction calls through RelayAdapt \
+                         (TransactionBuilder::relay), not through a sender account"
                     );
                 }
                 self.submit_legacy(ctx, builder).await?
@@ -1164,13 +1174,17 @@ impl Session {
             bail!("the fee quote expired while proving, run the operation again");
         }
 
+        let use_relay_adapt = proved.relay.is_some();
+        if use_relay_adapt {
+            ctx.step("submitting through RelayAdapt.relay (unwrap and recipient bound in adaptParams)");
+        }
         let sealed = self.broadcaster.seal(
             BroadcastRequest {
                 quote: quote.clone(),
                 to: proved.tx_data.to.to_checksum(None),
                 calldata: proved.tx_data.data.to_vec(),
                 min_gas_price: gas_price,
-                use_relay_adapt: false,
+                use_relay_adapt,
                 pre_transaction_pois,
             },
             &mut rand::rng(),
@@ -1292,7 +1306,7 @@ impl Session {
         margin_percent: u32,
     ) -> Result<UserOperationGasEstimate> {
         use alloy::rpc::types::state::{AccountOverride, StateOverride};
-        use userop_kit::validation_probe::{self as probe, pad_gas};
+        use userop_kit::validation_probe::{self as probe, alto::AltoPolicy, pad_gas};
 
         let price = (bundler as &dyn Bundler)
             .gas_price()
@@ -1374,8 +1388,11 @@ impl Session {
 
             let phases = probe::decode(&answer, !calls.is_empty())?;
 
-            let pre_verification = probe::pre_verification_gas(&dummy);
-            gas.pre_verification_gas = pad_gas(pre_verification, margin_percent * 2, GAS_BUCKET);
+            // The bundler prices paymaster data and signature as all non-zero bytes: take its
+            // way of counting, which is the higher one, and the usual margin.
+            let pre_verification =
+                probe::pre_verification_gas(&dummy).max(probe::alto::pre_verification_gas(&dummy));
+            gas.pre_verification_gas = pad_gas(pre_verification, margin_percent, GAS_BUCKET);
             // The EntryPoint charges its own pre-validation work to this limit (AA26), which the
             // probe cannot see: see `ENTRY_POINT_VALIDATION_OVERHEAD`.
             gas.verification_gas_limit = pad_gas(
@@ -1383,9 +1400,21 @@ impl Session {
                 margin_percent,
                 GAS_BUCKET,
             );
-            // Floors: bundlers refuse limits they find implausibly low, even for phases that do
-            // nothing, and a refusal after the proof costs a signature. They cost under 3% of fee.
-            gas.call_gas_limit = pad_gas(phases.call, margin_percent, GAS_BUCKET).max(30_000);
+            // Execution calls. The probe's search gives the smallest limit that works on-chain;
+            // the bundler will ask for more, by a rule read in its source and reproduced in
+            // `validation_probe::alto`: its own search ladder, then a multiplier (25.3k needed
+            // gives 68,136, to the unit). Size the limit from that prediction, with half the
+            // margin on top in case the deployment's multiplier moves a little. This is the one
+            // limit whose shortfall would strand funds on the ephemeral sender.
+            gas.call_gas_limit = if calls.is_empty() {
+                30_000
+            } else {
+                pad_gas(
+                    AltoPolicy::PIMLICO_PUBLIC.call_gas_limit(phases.call_limit),
+                    margin_percent / 2,
+                    GAS_BUCKET,
+                )
+            };
             gas.paymaster_verification_gas_limit =
                 Some(pad_gas(phases.paymaster_validation, margin_percent, GAS_BUCKET));
             gas.paymaster_post_op_gas_limit = Some(if phases.post_op_called {
@@ -1399,8 +1428,8 @@ impl Session {
 
         let (phases, pre_verification, total) = measured.expect("two rounds ran");
         ctx.step(format!(
-            "simulated before signing: account {}, paymaster {}, calls {}, post-op {}, pre-verification {} (formula); limits with {margin_percent}% margin total {total} gas",
-            phases.account_validation, phases.paymaster_validation, phases.call, phases.post_op, pre_verification
+            "simulated before signing: account {}, paymaster {}, calls {} used / {} minimal limit, post-op {}, pre-verification {} (bundler's formula); limits with {margin_percent}% margin total {total} gas",
+            phases.account_validation, phases.paymaster_validation, phases.call, phases.call_limit, phases.post_op, pre_verification
         ));
         Ok(gas)
     }

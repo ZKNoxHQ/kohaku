@@ -17,10 +17,17 @@ contract MockAccount {
         uint256 x; unchecked { for (uint256 i = 0; i < 50; i++) { x += uint256(keccak256(abi.encode(i))); } }
         return x == 0 ? 1 : 0;
     }
-    function run(address paymaster) external view {
+    function run(address paymaster, address payable to) external {
         require(msg.sender == ENTRY_POINT, "account: not from EntryPoint");
         require(MockPaymaster(paymaster).paid(), "account: nothing unshielded yet");
+        // Like the last step of a native unshield: native currency to the recipient. Towards a
+        // new account the CALL must have 34000 gas at hand, most of which it does not consume.
+        if (to != address(0)) {
+            (bool ok, ) = to.call{value: 1}("");
+            require(ok, "account: transfer failed");
+        }
     }
+    receive() external payable {}
 }
 
 /// Paymaster: accepts only from the EntryPoint and, like the Railgun verifier, only takes a

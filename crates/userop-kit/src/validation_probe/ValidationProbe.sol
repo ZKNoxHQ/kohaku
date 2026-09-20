@@ -30,6 +30,47 @@ contract ValidationProbe {
         bool postOpCalled;
         bytes paymasterError;
         bytes callError;
+        // Smallest gas limit with which the execution call succeeds, found by search. The gas
+        // used is not a limit: a value transfer must have 9000 gas at hand (34000 towards a new
+        // account) that it then hands back, and each nested call keeps 1/64 in reserve.
+        uint256 callGasLimit;
+    }
+
+    uint256 private constant SEARCH_START = 30_000;
+    uint256 private constant SEARCH_CEILING = 8_000_000;
+    uint256 private constant SEARCH_PRECISION = 1_000;
+
+    /// One trial of the execution call under `gasLimit`. Always reverts, so that the state is
+    /// the same for every trial and for the real call; the outcome travels in the revert data.
+    function attempt(address sender, bytes calldata callData, uint256 gasLimit) external {
+        require(msg.sender == address(this), "probe: internal");
+        (bool ok, ) = sender.call{gas: gasLimit}(callData);
+        bytes memory out = abi.encode(ok);
+        assembly { revert(add(out, 32), mload(out)) }
+    }
+
+    function _succeedsWith(address sender, bytes calldata callData, uint256 gasLimit) private returns (bool) {
+        // The trial must really be able to forward `gasLimit`.
+        if (gasleft() < gasLimit + gasLimit / 32 + 50_000) return false;
+        try this.attempt(sender, callData, gasLimit) {
+            return false;
+        } catch (bytes memory data) {
+            return data.length == 32 && abi.decode(data, (bool));
+        }
+    }
+
+    function _minimalCallGas(address sender, bytes calldata callData) private returns (uint256) {
+        uint256 high = SEARCH_START;
+        while (!_succeedsWith(sender, callData, high)) {
+            if (high >= SEARCH_CEILING) return 0;
+            high *= 2;
+        }
+        uint256 low = high == SEARCH_START ? 0 : high / 2;
+        while (high - low > SEARCH_PRECISION) {
+            uint256 mid = (low + high) / 2;
+            if (_succeedsWith(sender, callData, mid)) high = mid; else low = mid;
+        }
+        return high;
     }
 
     function probe(PackedUserOperation calldata op, bytes32 userOpHash, uint256 maxCost)
@@ -66,6 +107,8 @@ contract ValidationProbe {
             }
 
             if (op.callData.length > 0) {
+                // Before the real call, while the state is what the paymaster left.
+                if (ok) r.callGasLimit = _minimalCallGas(op.sender, op.callData);
                 g = gasleft();
                 (r.callSucceeded, ret) = op.sender.call(op.callData);
                 r.callGas = g - gasleft();

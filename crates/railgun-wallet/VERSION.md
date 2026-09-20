@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.10.0 (2026-09-20)
+
+Native unshield (unwrap and deliver the chain currency) on the legacy and direct transports.
+Ported from the work done in a parallel session, where it was numbered 0.9.7 / ADR-020: those
+numbers were already taken here, hence 0.10.0 / ADR-023. If that 0.9.7 zip was applied to the
+worktree, this cumulative release supersedes it.
+
+* The transaction unshields the wrapped token to the RelayAdapt contract, which unwraps its whole
+  balance and forwards the chain currency in the same EVM transaction; the submitter calls
+  `RelayAdapt.relay(transactions, actionData)` (`useRelayAdapt` on the broadcaster wire). The
+  recipient and the unwrap are bound into every proof through `boundParams.adaptParams`. Same
+  call sequence as the Railgun community engine (`populateUnshieldBaseToken`).
+* `requireSuccess` is false through a broadcaster, as in the engine (the Railgun transaction
+  lands even if a call fails), and true on the direct transport, where we send it ourselves.
+* SDK (`crates/railgun`): `RelayAction` (`transact::relay_adapt`) with the community's
+  `adaptParams` derivation and calldata, `TransactionBuilder::relay(action)` deriving the adapt
+  params from the nullifiers of the operations it just built, `ProvedTx::relay` and the
+  `ProvedTx::relay` field, RelayAdapt ABI completed. Three vectors generated with the community
+  ABI through ethers, plus a builder test (params bound in every operation, fee note still
+  first, `adapt()` and `relay()` refused together). `railgun --lib`: 57 passed.
+* 4337 is unchanged: the ephemeral sender unwraps and forwards, as before.
+
+Not checked on a chain. On Sepolia a native legacy unshield should give a transaction whose `to`
+is the RelayAdapt contract, and credit the recipient with the amount minus the 0.25% unshield
+fee.
+
+## 0.9.9 (2026-09-20)
+
+The bundler's estimate is now predicted from its source instead of guessed.
+
+* `userop_kit::validation_probe::alto` reproduces how alto (Pimlico) estimates: a bisection on a
+  fixed ladder of midpoints (floor 9,000, allowance 30M, tolerance 10,000), then a multiplier.
+  It gives the two figures observed on Sepolia to the unit: 25,312 needed for unwrap + send
+  becomes 30,971 on the ladder and 68,136 at 220%; the account verification becomes 38,295 and
+  51,698 at 135%. The multipliers are Pimlico's deployment settings, inferred from those matches
+  (alto's defaults are 100% and 130%).
+* The call limit is sized from that prediction plus half the margin, replacing the heuristic of
+  0.9.8. `preVerificationGas` uses alto's way of counting (paymaster data and signature priced
+  as all non-zero bytes), with the normal margin instead of twice.
+* Unchanged: the comparison with the bundler's real estimate after the proof. If Pimlico changes
+  its settings the prediction is off and the operation stops before sending.
+
+## 0.9.8 (2026-09-20)
+
+* Native unshield with "prove once" still stopped after the proof: `call needs 68136, limit is
+  40000`. The probe's search works (unwrap + send: 23.6k used, 25.3k minimal limit), but the
+  bundler asks for 68,136, the very same figure on two different transactions, so a rule of its
+  own rather than a measurement of this call. It cannot be known before the proof.
+* The call limit is now the larger of three times the searched minimum and the minimum plus 60k,
+  then the margin: 100k here. This is a heuristic fitted on that one observation, not a derived
+  value; the comparison with the bundler after the proof stays, and still stops the operation
+  before sending if the bundler wants more.
+
+## 0.9.7 (2026-09-20)
+
+* Fix: "prove once" on a native unshield (unwrap and deliver) stopped after the proof with `call
+  needs 68136, limit is 30000`. The call limit was sized from the gas the tail calls used
+  (23.6k). Gas used is not a limit: a value transfer must have 9000 gas at hand, 34000 towards a
+  new account, most of which it hands back, and every nested call keeps 1/64 in reserve.
+* The probe now searches for the smallest `callGasLimit` under which the execution call succeeds:
+  trials inside the same `eth_call`, each reverted so that the state stays what the paymaster
+  left, doubling then bisecting to within 1000 gas. The wallet sizes the limit from that figure
+  with twice the margin. The anvil test sends value to a new account and checks that the limit
+  found exceeds the gas used.
+* Nothing was sent and nothing was lost in the failed attempt; the token unshield of the same
+  session went through with a single proof (paymaster verification 1,465,747 of 1,700,000).
+
 ## 0.9.6 (2026-09-20)
 
 * "Empty cache" button in the header, with a confirmation that spells out the cost: full resync,

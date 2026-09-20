@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 
-use alloy::primitives::{Address, U256};
+use alloy::primitives::{Address, B256, U256};
 use rand::{CryptoRng, RngExt};
 use thiserror::Error;
 use tracing::info;
@@ -42,7 +42,7 @@ use crate::{
         unshield::UnshieldNote,
         utxo::UtxoNote,
     },
-    transact::proved_transaction::ProvedOperation,
+    transact::{proved_transaction::ProvedOperation, relay_adapt::RelayAction},
 };
 
 /// Basic builder for constructing railgun transactions. Transactions are sets
@@ -58,6 +58,9 @@ pub struct TransactionBuilder {
 
     adapt_contract: Option<Address>,
     adapt_params: Option<[u8; 32]>,
+    /// Calls RelayAdapt runs after the transaction. Sets the adapt contract and derives the
+    /// adapt params from the built operations, see [`Self::relay`].
+    relay: Option<RelayAction>,
     min_gas_price: u128,
 }
 
@@ -78,6 +81,8 @@ pub enum TransactionBuilderError {
     },
     #[error("A transaction can only carry one broadcaster fee")]
     MultipleBroadcasterFees,
+    #[error("adapt() and relay() both bind the adapt contract; use one of them")]
+    ConflictingAdapt,
     #[error(
         "The broadcaster fee of {value} cannot be paid from a single UTXO tree, it must be one note"
     )]
@@ -119,6 +124,7 @@ impl TransactionBuilder {
             unshields: HashSet::new(),
             adapt_contract: None,
             adapt_params: None,
+            relay: None,
             min_gas_price: 0,
         }
     }
@@ -217,6 +223,21 @@ impl TransactionBuilder {
         self
     }
 
+    /// Runs `action` through RelayAdapt after the transaction. The adapt contract becomes the
+    /// RelayAdapt contract and the adapt params are derived from the operations' nullifiers at
+    /// build time, so they are always consistent with what is proved. The transaction must then
+    /// be submitted as `RelayAdapt.relay(transactions, actionData)`, which
+    /// [`super::ProvedTx::relay`] encodes.
+    pub fn relay(mut self, action: RelayAction) -> Self {
+        self.relay = Some(action);
+        self
+    }
+
+    /// The RelayAdapt action set with [`Self::relay`], if any.
+    pub fn relay_action(&self) -> Option<&RelayAction> {
+        self.relay.as_ref()
+    }
+
     /// Builds and proves a set of operations for railgun, without packaging into a transaction.
     pub(crate) async fn build(
         &self,
@@ -255,9 +276,25 @@ impl TransactionBuilder {
         let groups = self.group_intents();
         let mut operations = build_groups(in_notes, groups, rng)?;
 
+        let (adapt_contract, adapt_params) = match &self.relay {
+            Some(action) => {
+                if self.adapt_contract.is_some() || self.adapt_params.is_some() {
+                    return Err(TransactionBuilderError::ConflictingAdapt);
+                }
+                // Nullifiers are fixed once the input notes are chosen, before proving, so the
+                // params bound here are exactly what RelayAdapt recomputes on-chain.
+                let nullifiers: Vec<Vec<B256>> = operations
+                    .iter()
+                    .map(|op| op.in_notes().iter().map(|n| n.nullifier.into()).collect())
+                    .collect();
+                (Some(action.relay_adapt), Some(action.adapt_params(&nullifiers)))
+            }
+            None => (self.adapt_contract, self.adapt_params),
+        };
+
         for op in &mut operations {
-            op.adapt_contract = self.adapt_contract;
-            op.adapt_params = self.adapt_params;
+            op.adapt_contract = adapt_contract;
+            op.adapt_params = adapt_params;
             op.min_gas_price = self.min_gas_price;
             op.verify()?;
         }
@@ -757,6 +794,51 @@ mod tests {
 
         assert_eq!(dummy.len(), 2);
         assert_eq!(me.signatures.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// RelayAdapt: the adapt params are derived from the nullifiers of the operations actually
+    /// built, and bound into each of them, so the broadcaster cannot change the calls.
+    #[test]
+    fn relay_binds_the_action_to_the_built_operations() {
+        use alloy::primitives::B256;
+
+        use crate::transact::RelayAction;
+
+        let me = PrivateKeySigner::new_evm(random(), random(), 1);
+        let broadcaster = PrivateKeySigner::new_evm(random(), random(), 1);
+        let relay_adapt = address!("0x7e3d929EbD5bDC84d02Bd3205c777578f33A214D");
+        let recipient = address!("0x000000000000000000000000000000000000bEEF");
+        let notes = [note(&me, 0, 0, WETH, 100), note(&me, 0, 1, WETH, 50)];
+        let action = RelayAction::unshield_base_token(relay_adapt, recipient, &mut rand::rng());
+
+        let builder = TransactionBuilder::new()
+            .unshield(me.clone(), relay_adapt, WETH, 120)
+            .unwrap()
+            .broadcaster_fee(me.clone(), broadcaster.address(), WETH, 5)
+            .unwrap()
+            .relay(action.clone());
+        let ops = builder.operations(&notes, &mut rand::rng()).unwrap();
+
+        let nullifiers: Vec<Vec<B256>> = ops
+            .iter()
+            .map(|op| op.in_notes().iter().map(|n| n.nullifier.into()).collect())
+            .collect();
+        assert_eq!(nullifiers[0].len(), 2);
+        for op in &ops {
+            assert_eq!(op.adapt_contract, Some(relay_adapt));
+            assert_eq!(op.adapt_params, Some(action.adapt_params(&nullifiers)));
+        }
+        // The fee note still leads, as broadcasters require.
+        assert_eq!(out_values(&ops[0])[0], 5);
+
+        // adapt() and relay() would bind two different contracts.
+        let both = TransactionBuilder::new()
+            .unshield(me.clone(), relay_adapt, WETH, 10)
+            .unwrap()
+            .adapt(relay_adapt, [0u8; 32])
+            .relay(action)
+            .operations(&notes, &mut rand::rng());
+        assert!(matches!(both, Err(TransactionBuilderError::ConflictingAdapt)));
     }
 
     /// `minGasPrice` is part of the proven bound params: 0 by default, and the dummy build has

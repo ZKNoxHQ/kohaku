@@ -30,7 +30,7 @@ use crate::{
         types::{BlindedCommitmentType, PoiStatus, PreTransactionPois},
     },
     transact::{
-        ShieldBuilder, TransactionBuilder, TransactionBuilderError,
+        RelayAction, ShieldBuilder, TransactionBuilder, TransactionBuilderError,
         proved_transaction::{ProvedOperation, ProvedTx},
     },
 };
@@ -296,6 +296,7 @@ impl RailgunProvider {
         rng: &mut impl CryptoRng,
     ) -> Result<ProvedTx, RailgunProviderError> {
         let spendable_notes = self.spendable_notes().await;
+        let relay = builder.relay_action().cloned();
         let operations = builder
             .build_dummy(
                 self.chain.id,
@@ -304,7 +305,15 @@ impl RailgunProvider {
                 rng,
             )
             .await?;
-        Ok(ProvedTx::new(self.chain.railgun_smart_wallet, operations))
+        Ok(self.package(operations, relay))
+    }
+
+    /// `transact` on the smart wallet, or `relay` on RelayAdapt when the builder asked for it.
+    fn package(&self, operations: Vec<ProvedOperation>, relay: Option<RelayAction>) -> ProvedTx {
+        match relay {
+            Some(action) => ProvedTx::relay(operations, action),
+            None => ProvedTx::new(self.chain.railgun_smart_wallet, operations),
+        }
     }
 
     /// Generates the pre-transaction POI proofs a Railgun broadcaster requires alongside the
@@ -327,13 +336,13 @@ impl RailgunProvider {
         builder: TransactionBuilder,
         rng: &mut impl CryptoRng,
     ) -> Result<ProvedTx, RailgunProviderError> {
+        let relay = builder.relay_action().cloned();
         let operations = self.build_operation(builder, rng).await?;
         if let Some(poi_provider) = &mut self.poi_provider {
             poi_provider.register_ops(&operations).await?;
         }
 
-        let proved_tx = ProvedTx::new(self.chain.railgun_smart_wallet, operations);
-        Ok(proved_tx)
+        Ok(self.package(operations, relay))
     }
 
     /// The UserOperation [`Self::prepare_userop`] would build, with a dummy proof: same

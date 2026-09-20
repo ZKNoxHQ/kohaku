@@ -242,3 +242,70 @@ percent apart, every request went to the less reliable one. The draw within 10% 
 behaviour. No automatic retry on another broadcaster: the fee note is addressed to the
 broadcaster, so a retry is a new proof and, with a hardware signer, a new signature the user has
 to approve.
+
+## ADR-020: limits are searched, not derived from gas used, where the two diverge
+
+Gas used underestimates the limit a phase needs. For the paymaster validation the gap is the
+63/64 rule over a few nested calls, 8% on two live runs, inside the margin. For the execution
+call it can be a factor of three: value transfers require gas they do not consume. A margin on
+the wrong quantity is not a safety margin.
+
+The probe therefore finds the minimal call limit by trial, on-chain semantics included, inside
+the simulation (each trial reverted). This is what bundlers do with a binary search. It is only
+done for the call phase: a trial of the paymaster phase costs 1.4M gas, ten of them would exceed
+what public RPCs allow in an `eth_call`, and there the measured gap is small and stable.
+
+The call limit is also the one whose shortfall is dangerous: the unshield happens during
+validation, so an execution that runs out of gas leaves the funds on the ephemeral sender. Hence
+twice the margin on it, and the strict comparison with the bundler's figure after the proof.
+
+## ADR-021: the bundler's call limit is policy, like its pre-verification gas
+
+Second correction to the idea that everything can be measured. The probe measures what the chain
+needs; the bundler's estimate is what the bundler wants, and for the call phase the two differ
+by a factor of 2.7 on the only case observed (25.3k needed, 68,136 wanted, identical across two
+transactions). Its rule is not known and cannot be queried without a valid proof.
+
+Two options were weighed. Dropping the comparison for this limit and trusting the probe: cheaper,
+but if the probe were wrong about a 7702 sender, the failure mode is funds stranded on the
+ephemeral address. Keeping the comparison and over-provisioning: costs about 5% of the fee on
+native unshields only. The second was chosen; the multiplier is a named heuristic to revisit with
+more observations or with the bundler's source.
+
+## ADR-022: predict the bundler's estimate from its source
+
+Supersedes the heuristic of ADR-021. The bundler's figures are not measurements of the
+transaction: alto bisects on fixed midpoints and scales the result, which is why the same
+68,136 came back for two different transactions. Reading the rule makes the pre-proof limits land
+at or above what the bundler will say, by construction, for as long as its settings hold.
+
+What stays inferred rather than read: the two multipliers of Pimlico's public deployment (220%
+call, 135% verification). Each rests on one exact match. A prediction slightly larger need is
+also evaluated, because near a ladder edge our measure and alto's can fall on different steps.
+
+This ties the single-proof path to one bundler implementation. Another bundler needs its own
+policy, or falls back on the post-proof comparison to fail safely. `AltoPolicy` is a value, not
+a global, for that reason.
+
+## ADR-023: native unshield outside 4337 goes through RelayAdapt, bound in the proof
+
+(ADR-020 in the parallel session this was ported from.)
+
+On the 4337 transport the ephemeral 7702 sender unwraps and forwards the chain currency during
+the same UserOperation. A broadcaster has no such sender: it submits the calldata it is given,
+from its own EOA. The community engine solves this with RelayAdapt: the transaction unshields
+the wrapped token to the RelayAdapt contract, and `relay(transactions, actionData)` runs
+`unwrapBase` then `transfer` to the recipient after `transact`. `actionData` (calls, a 31-byte
+salt, `requireSuccess`, `minGasLimit`) is hashed with the transactions' nullifiers into
+`adaptParams`, a bound parameter of every proof, recomputed on-chain. A different recipient, a
+dropped unwrap or a replay under other nullifiers all fail verification.
+
+Reproduced exactly rather than varied, because broadcasters only accept `RelayAdapt.relay`
+calldata of the shape they know, and so that the derivation can be checked against the community
+ABI. The adapt params are computed inside the builder from the operations it just built, never
+from a separate dummy build, so they cannot drift from what is proved.
+
+Known property of RelayAdapt, not introduced here: with `requireSuccess = false`, a failed
+`transfer` leaves the unwrapped currency on the RelayAdapt contract, where the next caller can
+take it. The transfer of native currency to an address only fails if the recipient is a contract
+that rejects it. The direct transport uses `requireSuccess = true`.

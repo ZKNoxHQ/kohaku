@@ -26,7 +26,7 @@ use userop_kit::{
 const BYPASS: Address = address!("0x000000000000000000000000000000000000dEaD");
 
 sol! {
-    function run(address paymaster) external view;
+    function run(address paymaster, address to) external;
 }
 
 async fn deploy(provider: &impl Provider, from: Address, hex_code: &str) -> Address {
@@ -64,6 +64,7 @@ async fn probe_measures_each_phase_from_the_bypass_origin() {
     let account = deploy(&provider, deployer, include_str!("fixtures/MockAccount.bin")).await;
     let paymaster = deploy(&provider, deployer, include_str!("fixtures/MockPaymaster.bin")).await;
 
+    let fresh = address!("0x00000000000000000000000000000000000f4e54"); // never seen on this chain
     let user_op = |with_call: bool| {
         let mut builder = UserOperationBuilder::<()>::new(
             account,
@@ -81,7 +82,7 @@ async fn probe_measures_each_phase_from_the_bypass_origin() {
             max_priority_fee_per_gas: 1,
         });
         if with_call {
-            builder = builder.with_calldata(runCall { paymaster }.abi_encode().into());
+            builder = builder.with_calldata(runCall { paymaster, to: fresh }.abi_encode().into());
         }
         builder.build()
     };
@@ -97,6 +98,8 @@ async fn probe_measures_each_phase_from_the_bypass_origin() {
             for (address, code) in request.code_overrides {
                 overrides.insert(address, AccountOverride::default().with_code(code));
             }
+            // The mock account forwards 1 wei.
+            overrides.insert(account, AccountOverride::default().with_balance(U256::from(10u64)));
             let answer = provider
                 .call(
                     TransactionRequest::default()
@@ -115,12 +118,18 @@ async fn probe_measures_each_phase_from_the_bypass_origin() {
     let gas = run(user_op(true), 1_000, BYPASS).await.unwrap();
     assert!(gas.account_validation > 5_000, "{gas:?}");
     assert!(gas.paymaster_validation > gas.account_validation * 4, "{gas:?}");
+    eprintln!("probe on anvil: {gas:?}");
     assert!(gas.call > 500, "{gas:?}");
+    // The value transfer to a new account needs 34000 gas at hand: the limit found by trial is
+    // well above the gas used, which is what a bundler reports too.
+    assert!(gas.call_limit >= 34_000, "{gas:?}");
+    assert!(gas.call_limit > gas.call, "{gas:?}");
+    assert!(gas.call_limit < gas.call * 4, "{gas:?}");
     assert!(gas.post_op_called && gas.post_op > 20_000, "{gas:?}");
 
     // No execution calldata, and a paymaster that returns no context: nothing else is called.
     let gas = run(user_op(false), 1, BYPASS).await.unwrap();
-    assert_eq!((gas.call, gas.post_op, gas.post_op_called), (0, 0, false));
+    assert_eq!((gas.call, gas.call_limit, gas.post_op, gas.post_op_called), (0, 0, 0, false));
 
     // From any other origin the paymaster rejects the dummy proof: the probe says why.
     match run(user_op(false), 1_000, deployer).await {
