@@ -83,8 +83,8 @@ The dummy proof is a distinct entry point and is never used inside the `prepare_
 the bundler simulates `validatePaymasterUserOp`, which verifies the SNARK with its own origin.
 
 Pre-transaction POI follows the Railgun engine (`createDummyMerkleProof`, pre-inclusion
-position 199999). It could not be checked against a live broadcaster yet; that happens with the
-transport.
+position 199999). Accepted by live broadcasters on Sepolia on 2026-09-20, for a transfer and for
+an operation with an unshield (`railgunTxidIfHasUnshield`).
 
 ## ADR-010: Waku I/O on the server runtime, not the engine thread
 

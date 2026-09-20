@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.3 (2026-09-20)
+
+Documentation only. Legacy transport validated end to end on Sepolia: private transfer and
+token unshield relayed by a community broadcaster, pre-transaction POIs accepted, and
+post-transaction POIs validated (change notes spendable again after sync). README and ADR-009
+no longer list these as unverified. Still open: native unshield over legacy (RelayAdapt),
+mainnet.
+
 ## 0.7.2 (2026-09-20)
 
 * Fix: the legacy gas estimate reverted with "RailgunSmartWallet: Gas price too low". The

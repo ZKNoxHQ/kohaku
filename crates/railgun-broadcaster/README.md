@@ -70,5 +70,10 @@ the u128 overflow case), and wallet/broadcaster exchanges over the in-memory hub
 out-of-range announcements dropped, request opened only by its addressee, refusal and timeout
 told apart).
 
-Not covered: a live broadcaster. The first real run will validate the request as a whole, the
-pre-transaction POI format above all.
+Validated against the live Railgun fleet on Sepolia (2026-09-20), through the wallet and its
+js-waku tab node: offers received and authenticated, Railway's trusted signers announcing, a
+private transfer and a token unshield relayed by a broadcaster, pre-transaction POIs accepted,
+post-transaction POIs validated for the change notes.
+
+Not validated: mainnet, the nwaku REST transport against a real node, native unshield (needs
+RelayAdapt, not built by the SDK yet), a fee token other than the wrapped base token.
