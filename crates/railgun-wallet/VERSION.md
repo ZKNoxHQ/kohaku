@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.6 (2026-09-20)
+
+* "Empty cache" button in the header, with a confirmation that spells out the cost: full resync,
+  wallet locked and to be reopened. It deletes the database of the open account on the current
+  network (`POST /api/empty-cache`), waits behind a running job, and keeps
+  `ephemeral_senders.jsonl`. Proofs still owed for mined transactions come back through the POI
+  recovery.
+* Fix of the 0.9.5 pruning rule, which left the orphans in place in the most common case: after
+  a relayer that does not answer, the retry spends the same notes, so the orphan's inputs are all
+  spent and it looked mined. An entry is now also dropped when its inputs were spent by an
+  operation with another txid; it is kept while the spending operation is not known yet.
+
 ## 0.9.5 (2026-09-20)
 
 * Pending POI entries of operations that never reached the chain are dropped at sync (SDK fork:

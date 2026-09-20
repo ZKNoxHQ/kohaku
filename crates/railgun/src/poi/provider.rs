@@ -271,16 +271,22 @@ impl PoiProvider {
     ///
     /// A mined operation nullifies every one of its inputs. So, once the UTXO indexer is synced,
     /// an entry with an input still unspent is not on-chain; past the grace period it will not
-    /// be, because the relayer's quote has expired. Such an entry can never be submitted (its
+    /// be, because the relayer's quote has expired. And an entry whose inputs were spent by an
+    /// operation with another txid (the retry) can never be mined at all. Such an entry can never be submitted (its
     /// txid is in no tree) and would be retried at every sync. The POI node never saw it: nothing
     /// is sent before the txid is validated, so there is nothing to clean up remotely. If the
     /// transaction does land later, `recover_missing` rebuilds the entry from chain data.
     fn prune_unmined(&mut self, accounts: &[RecoveryAccount]) -> usize {
         let now = now_secs();
         let before = self.inner.pending.len();
+        let own_ops: Vec<(Txid, Vec<U256>)> = self
+            .txid_indexer
+            .own_ops()
+            .map(|(txid, op)| (*txid, op.nullifiers.clone()))
+            .collect();
         self.inner
             .pending
-            .retain(|entry| !never_mined(entry, accounts, now));
+            .retain(|entry| !never_mined(entry, accounts, &own_ops, now));
         before - self.inner.pending.len()
     }
 
@@ -584,23 +590,45 @@ fn entry_from_op(op: &ProvedOperation, list_keys: Vec<ListKey>) -> PendingPoiEnt
     }
 }
 
-/// ZKNOX fork: see `PoiProvider::prune_unmined`.
-fn never_mined(entry: &PendingPoiEntry, accounts: &[RecoveryAccount], now: u64) -> bool {
+/// ZKNOX fork: see `PoiProvider::prune_unmined`. `own_ops` are the on-chain operations that
+/// spend a nullifier of ours, as `(txid, nullifiers)`.
+fn never_mined(
+    entry: &PendingPoiEntry,
+    accounts: &[RecoveryAccount],
+    own_ops: &[(Txid, Vec<U256>)],
+    now: u64,
+) -> bool {
     if now.saturating_sub(entry.created_at) < UNMINED_GRACE_SECS {
         return false;
     }
-    // Only judge entries of an account we track: its unspent set is what proves it.
+    // On-chain under this very txid: mined, the proof is due.
+    if own_ops.iter().any(|(txid, _)| *txid == entry.txid) {
+        return false;
+    }
+    // Only judge entries of an account we track: its notes are the evidence.
     let Some(account) = accounts
         .iter()
         .find(|a| a.spending_pubkey == entry.spending_pubkey)
     else {
         return false;
     };
-    entry.in_notes.iter().any(|input| {
+    // A mined operation nullifies all its inputs: one still unspent means it was not sent.
+    let an_input_is_unspent = entry.in_notes.iter().any(|input| {
         account
             .unspent
             .iter()
             .any(|n| n.tree_number == input.tree_number && n.leaf_index == input.leaf_index)
+    });
+    if an_input_is_unspent {
+        return true;
+    }
+    // All inputs are spent, but not by this operation: another one took them (typically the
+    // retry after a relayer that did not answer), so this one can never be mined. Requires the
+    // spending operation to be known, otherwise the txid indexer may just be behind.
+    entry.in_notes.iter().any(|input| {
+        own_ops
+            .iter()
+            .any(|(txid, nullifiers)| *txid != entry.txid && nullifiers.contains(&input.nullifier))
     })
 }
 
@@ -741,13 +769,21 @@ mod prune_tests {
         let old = now - UNMINED_GRACE_SECS - 1;
 
         // One input still unspent, long after the proof: never sent.
-        assert!(never_mined(&entry(old), &[account(vec![note(5), note(9)])], now));
+        assert!(never_mined(&entry(old), &[account(vec![note(5), note(9)])], &[], now));
         // Entries written before the timestamp existed count as old.
-        assert!(never_mined(&entry(0), &[account(vec![note(4)])], now));
-        // Both inputs gone: mined, the proof is due.
-        assert!(!never_mined(&entry(old), &[account(vec![note(9)])], now));
+        assert!(never_mined(&entry(0), &[account(vec![note(4)])], &[], now));
+        // Both inputs gone and the spender unknown yet (txid indexer behind): wait.
+        assert!(!never_mined(&entry(old), &[account(vec![note(9)])], &[], now));
+        // Both inputs gone, spent by this very operation: mined, the proof is due.
+        let e = entry(old);
+        let nullifiers: Vec<U256> = e.in_notes.iter().map(|n| n.nullifier).collect();
+        let mined = vec![(e.txid, nullifiers.clone())];
+        assert!(!never_mined(&e, &[account(vec![note(9)])], &mined, now));
+        // Both inputs gone, spent by another operation (the retry): this one is dead.
+        let retry = vec![(Txid::new(&nullifiers, &[U256::from(1u8)], U256::ZERO), nullifiers)];
+        assert!(never_mined(&e, &[account(vec![note(9)])], &retry, now));
         // Just proved, maybe in a relayer's hands: wait.
-        assert!(!never_mined(&entry(now - 60), &[account(vec![note(4), note(5)])], now));
+        assert!(!never_mined(&entry(now - 60), &[account(vec![note(4), note(5)])], &[], now));
         // Not one of our accounts: no evidence, keep.
         let stranger = PrivateKeySigner::new_evm(random(), random(), 1);
         let other = RecoveryAccount {
@@ -757,6 +793,6 @@ mod prune_tests {
             spent: vec![],
             sent: vec![],
         };
-        assert!(!never_mined(&entry(old), &[other], now));
+        assert!(!never_mined(&entry(old), &[other], &[], now));
     }
 }

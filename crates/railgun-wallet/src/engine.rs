@@ -269,6 +269,8 @@ impl Op {
 pub enum Command {
     Unlock(Box<UnlockParams>, oneshot::Sender<Result<(), String>>),
     Lock(oneshot::Sender<()>),
+    /// Deletes the local database of the open wallet and locks it.
+    EmptyCache(oneshot::Sender<Result<String, String>>),
     Job { id: u64, op: Op },
 }
 
@@ -372,6 +374,10 @@ impl Engine {
                 }
                 let _ = reply.send(res);
             }
+            Command::EmptyCache(reply) => {
+                let res = self.empty_cache().map_err(|e| format!("{e:#}"));
+                let _ = reply.send(res);
+            }
             Command::Lock(reply) => {
                 self.session = None;
                 if let Ok(mut s) = self.shared.status.write() {
@@ -419,6 +425,42 @@ impl Engine {
         if let Ok(mut jobs) = self.shared.jobs.lock() {
             jobs.update(id, f);
         }
+    }
+
+    /// Removes everything the wallet cached for the open account on this chain: synced
+    /// commitments, decrypted notes, txid trees, pending POI entries. Keys are not on disk, so
+    /// the wallet is locked and has to be reopened; the first sync is then a full one. Proofs
+    /// still owed for mined transactions are rebuilt from chain data by the POI recovery.
+    /// `ephemeral_senders.jsonl` is kept: it holds keys that may still control funds.
+    fn empty_cache(&mut self) -> Result<String> {
+        let session = self
+            .session
+            .take()
+            .ok_or_else(|| anyhow!("open the wallet first: the cache is per account and chain"))?;
+        let data_dir = session.data_dir.clone();
+        // Closes the database handles and stops the fee monitor before touching the files.
+        drop(session);
+        if let Ok(mut s) = self.shared.status.write() {
+            *s = StatusSnapshot {
+                updated_at: now_ms(),
+                ..Default::default()
+            };
+        }
+        if let Ok(mut l) = self.shared.legacy.write() {
+            *l = LegacyStatus::default();
+        }
+
+        let mut removed = Vec::new();
+        for entry in std::fs::read_dir(&data_dir).with_context(|| format!("reading {}", data_dir.display()))? {
+            let path = entry?.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            if path.is_dir() && name.starts_with("db") {
+                std::fs::remove_dir_all(&path).with_context(|| format!("removing {}", path.display()))?;
+                removed.push(name);
+            }
+        }
+        info!("cache emptied: {} ({:?})", data_dir.display(), removed);
+        Ok(format!("{} ({})", data_dir.display(), removed.join(", ")))
     }
 
     async fn unlock(&mut self, p: UnlockParams) -> Result<()> {

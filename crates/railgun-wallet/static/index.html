@@ -129,6 +129,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
   <span class="spacer"></span>
   <label class="check" style="margin:0"><input type="checkbox" id="auto-sync"> sync every minute</label>
   <button class="quiet" id="btn-sync" disabled>Sync now</button>
+  <button class="quiet" id="btn-cache" disabled>Empty cache</button>
   <button class="quiet" id="btn-lock" disabled>Lock</button>
 </header>
 
@@ -570,6 +571,7 @@ function render() {
   $("view-unlock").hidden = unlocked;
   $("view-wallet").hidden = !unlocked;
   $("btn-lock").disabled = !unlocked;
+  $("btn-cache").disabled = !unlocked || !!state.activeJob;
   const busy = !!state.activeJob;
   $("btn-sync").disabled = !unlocked || busy;
   for (const id of ["btn-shield", "btn-transfer", "btn-unshield"]) $(id).disabled = busy;
@@ -647,6 +649,22 @@ $("btn-unlock").addEventListener("click", async () => {
 });
 
 $("btn-lock").addEventListener("click", async () => { try { await api("/api/lock", {}); $("log").textContent = ""; } catch (e) { banner(e.message); } poll(); });
+$("btn-cache").addEventListener("click", async () => {
+  const ok = window.confirm(
+    "Empty the local cache of this wallet on this network?\n\n" +
+    "This deletes the synced notes, the Merkle trees and the pending proof-of-innocence entries. " +
+    "It will require a full resync (one to two minutes on Sepolia, longer on mainnet), and the wallet " +
+    "is locked: you will have to open it again.\n\n" +
+    "No funds or keys are affected. Proofs still owed for transactions that were mined are rebuilt from the chain at the next syncs.");
+  if (!ok) return;
+  banner("");
+  try {
+    const r = await api("/api/empty-cache", {});
+    await tab.stop(); $("log").textContent = "";
+    banner("Cache emptied: " + r.removed + ". Open the wallet again, the first sync will be a full one.");
+  } catch (e) { banner("Could not empty the cache: " + e.message); }
+  poll();
+});
 $("btn-sync").addEventListener("click", () => submitOp({ op: "sync" }));
 $("btn-copy").addEventListener("click", () => navigator.clipboard?.writeText($("zk-addr").textContent));
 

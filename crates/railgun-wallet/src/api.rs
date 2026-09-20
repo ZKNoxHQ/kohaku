@@ -39,6 +39,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/status", get(status))
         .route("/api/unlock", post(unlock))
         .route("/api/lock", post(lock))
+        .route("/api/empty-cache", post(empty_cache))
         .route("/api/op", post(op))
         .route("/api/jobs", get(jobs))
         .route("/api/jobs/{id}", get(job))
@@ -231,6 +232,19 @@ async fn lock(State(state): State<AppState>) -> Response {
         return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
     }
     Json(json!({ "ok": true })).into_response()
+}
+
+async fn empty_cache(State(state): State<AppState>) -> Response {
+    // Queued behind a running job like any command: never deletes under a sync or a proof.
+    let (tx, rx) = oneshot::channel();
+    if state.engine.send(Command::EmptyCache(tx)).await.is_err() {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
+    }
+    match rx.await {
+        Ok(Ok(removed)) => Json(json!({ "ok": true, "removed": removed })).into_response(),
+        Ok(Err(e)) => err(StatusCode::CONFLICT, e),
+        Err(_) => err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped"),
+    }
 }
 
 async fn op(State(state): State<AppState>, Json(op): Json<Op>) -> Response {
