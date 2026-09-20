@@ -26,7 +26,7 @@ use crate::{
     note::{Note, utxo::UtxoNote},
     poi::{
         provider::{PoiProvider, PoiProviderError},
-        types::{BlindedCommitmentType, PoiStatus},
+        types::{BlindedCommitmentType, PoiStatus, PreTransactionPois},
     },
     transact::{
         ShieldBuilder, TransactionBuilder, TransactionBuilderError,
@@ -81,6 +81,18 @@ impl NoteEntry {
     }
 }
 
+fn list_key_string(key: &crate::poi::types::ListKey) -> String {
+    serde_json::to_value(key)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// `tx.origin` for which the Railgun verifier skips the SNARK check (`VERIFICATION_BYPASS` in the
+/// contracts). Only meaningful as the `from` of an `eth_estimateGas` on a dummy-proof transaction.
+pub const VERIFICATION_BYPASS: Address =
+    alloy::primitives::address!("0x000000000000000000000000000000000000dEaD");
+
 /// Interfaces with the RAILGUN protocol.
 pub struct RailgunProvider {
     chain: ChainConfig,
@@ -106,6 +118,8 @@ pub enum RailgunProviderError {
     Bundler(#[from] BundlerError),
     #[error("RPC error: {0}")]
     Rpc(#[from] Eip1193Error),
+    #[error("POI is not enabled on this provider")]
+    PoiDisabled,
     #[error("Privacy Paymaster not configured for chain: {0}")]
     PrivacyPaymasterNotConfigured(u64),
     #[error("Other: {0}")]
@@ -129,6 +143,42 @@ impl RailgunProvider {
         })
     }
 
+    // ---- ZKNOX fork: read-only accessors used by crates/railgun-wallet ----
+
+    /// Chain configuration this provider was built with.
+    pub fn chain(&self) -> &ChainConfig {
+        &self.chain
+    }
+
+    /// Last block the UTXO indexer has been synced to.
+    pub fn synced_block(&self) -> u64 {
+        self.utxo_indexer.synced_block()
+    }
+
+    /// Whether POI support is enabled on this provider.
+    pub fn poi_enabled(&self) -> bool {
+        self.poi_provider.is_some()
+    }
+
+    /// POI list keys this provider proves against, empty when POI is off.
+    pub fn poi_list_keys(&self) -> Vec<String> {
+        self.poi_provider
+            .as_ref()
+            // Not `to_string()`: Display renders "ListKey(…)", the wire form is the serde string.
+            .map(|p| p.list_keys().iter().map(list_key_string).collect())
+            .unwrap_or_default()
+    }
+
+    /// Summaries of the post-transaction POI proofs still waiting to be submitted.
+    pub fn poi_pending(&self) -> Vec<crate::poi::provider::PendingPoiSummary> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| p.pending_summaries())
+            .unwrap_or_default()
+    }
+
+    // ---- end ZKNOX fork ----
+
     /// Register a signer with the provider. The provider will index and track
     /// UTXOs for the associated address.
     pub async fn register(
@@ -149,7 +199,12 @@ impl RailgunProvider {
         self.utxo_indexer.sync_to(to_block).await?;
 
         if let Some(poi_provider) = &mut self.poi_provider {
-            poi_provider.sync_to(&self.prover, to_block).await?;
+            // ZKNOX fork: the account history lets the POI provider rebuild proofs for
+            // operations it did not build itself.
+            let accounts = self.utxo_indexer.recovery_accounts();
+            poi_provider
+                .sync_to(&self.prover, to_block, &accounts)
+                .await?;
         }
 
         Ok(())
@@ -193,6 +248,43 @@ impl RailgunProvider {
     /// Helper to create a transaction builder.
     pub fn transact(&self) -> TransactionBuilder {
         TransactionBuilder::new()
+    }
+
+    /// Builds the transaction with an all-zero proof, for gas estimation only.
+    ///
+    /// Call `eth_estimateGas` on the result with `from` set to [`VERIFICATION_BYPASS`]: the
+    /// Railgun verifier skips the SNARK check for that origin. Nothing is registered with the
+    /// POI provider and no proof is generated, so this is cheap enough to run before every quote.
+    /// Not usable on the ERC-4337 path, where the bundler simulates with its own origin.
+    pub async fn build_dummy(
+        &mut self,
+        builder: TransactionBuilder,
+        rng: &mut impl CryptoRng,
+    ) -> Result<ProvedTx, RailgunProviderError> {
+        let spendable_notes = self.spendable_notes().await;
+        let operations = builder
+            .build_dummy(
+                self.chain.id,
+                &spendable_notes,
+                &self.utxo_indexer.utxo_trees,
+                rng,
+            )
+            .await?;
+        Ok(ProvedTx::new(self.chain.railgun_smart_wallet, operations))
+    }
+
+    /// Generates the pre-transaction POI proofs a Railgun broadcaster requires alongside the
+    /// transaction, one per operation and per list key. Fails when POI is not enabled.
+    pub async fn pre_transaction_pois(
+        &self,
+        operations: &[ProvedOperation],
+    ) -> Result<PreTransactionPois, RailgunProviderError> {
+        let Some(poi_provider) = &self.poi_provider else {
+            return Err(RailgunProviderError::PoiDisabled);
+        };
+        Ok(poi_provider
+            .pre_transaction_pois(&self.prover, operations)
+            .await?)
     }
 
     /// Build a transaction builder into a proved, signable transaction.
@@ -372,17 +464,7 @@ impl RailgunProvider {
         builder: TransactionBuilder,
         rng: &mut impl CryptoRng,
     ) -> Result<Vec<ProvedOperation>, RailgunProviderError> {
-        let in_notes = self.all_unspent().await;
-        let spendable_notes: Vec<UtxoNote> = if let Some(_) = self.poi_provider {
-            in_notes
-                .into_iter()
-                .filter(|(_, status)| *status == Some(PoiStatus::Valid))
-                .map(|(note, _)| note)
-                .collect()
-        } else {
-            in_notes.into_iter().map(|(note, _)| note).collect()
-        };
-
+        let spendable_notes = self.spendable_notes().await;
         let operations = builder
             .build(
                 &self.prover,
@@ -394,6 +476,20 @@ impl RailgunProvider {
             .await?;
 
         Ok(operations)
+    }
+
+    /// Notes usable as inputs: all unspent notes, restricted to POI-valid ones when POI is on.
+    async fn spendable_notes(&mut self) -> Vec<UtxoNote> {
+        let in_notes = self.all_unspent().await;
+        if self.poi_provider.is_some() {
+            in_notes
+                .into_iter()
+                .filter(|(_, status)| *status == Some(PoiStatus::Valid))
+                .map(|(note, _)| note)
+                .collect()
+        } else {
+            in_notes.into_iter().map(|(note, _)| note).collect()
+        }
     }
 }
 
