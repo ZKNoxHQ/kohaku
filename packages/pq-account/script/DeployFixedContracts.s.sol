@@ -5,13 +5,11 @@ import {console} from "forge-std/Test.sol";
 
 import {BaseScript} from "ETHDILITHIUM/script/BaseScript.sol";
 import {ZKNOX_dilithium} from "ETHDILITHIUM/src/ZKNOX_dilithium.sol";
-import {ZKNOX_ethdilithium} from "ETHDILITHIUM/src/ZKNOX_ethdilithium.sol";
 
 import {ECDSAk1Verifier} from "../lib/InterfaceVerifier/src/VerifierECDSAk1.sol";
 import {ECDSAr1Verifier} from "../lib/InterfaceVerifier/src/VerifierECDSAr1.sol";
 
 import {ZKNOX_falcon} from "ETHFALCON/src/ZKNOX_falcon.sol";
-import {ZKNOX_ethfalcon} from "ETHFALCON/src/ZKNOX_ethfalcon.sol";
 
 abstract contract VerifierDeployer is BaseScript {
     string internal saltLabel;

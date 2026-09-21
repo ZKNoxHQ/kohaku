@@ -42,4 +42,4 @@ forge script $CONTRACT_NAME \
 --resume
 
 # # with ledger
-# forge script $CONTRACT_NAME --rpc-url $RPC --ledger --broadcast --tc Script_Deploy_ETHDilithium --etherscan-api-key $API_KEY_OPTIMISM --verify --priority-gas-price 1
+# forge script $CONTRACT_NAME --rpc-url $RPC --ledger --broadcast --tc $3 --etherscan-api-key $API_KEY_OPTIMISM --verify --priority-gas-price 1
