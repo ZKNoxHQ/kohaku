@@ -1,0 +1,27 @@
+[package]
+name = "railgun-ledger"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# Native USB HID transport via coins-ledger. Off by default so workspace builds
+# do not require system HID libraries (libudev headers on Linux).
+usb = ["dep:coins-ledger"]
+
+[dependencies]
+async-trait = { workspace = true }
+common = { workspace = true }
+hex = { workspace = true }
+railgun = { workspace = true }
+ruint = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+coins-ledger = { version = "0.13", optional = true }
+
+[build-dependencies]
+cfg_aliases = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

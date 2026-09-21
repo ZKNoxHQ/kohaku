@@ -8,6 +8,7 @@ members = [
     "crates/eip-1193-provider",
     "crates/poseidon-rust",
     "crates/railgun",
+    "crates/railgun-ledger",
     "crates/railgun-ts",
     "crates/railgun-broadcaster",
     "crates/railgun-wallet",

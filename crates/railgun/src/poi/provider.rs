@@ -569,7 +569,7 @@ fn entry_from_op(op: &ProvedOperation, list_keys: Vec<ListKey>) -> PendingPoiEnt
     let encryptable_notes = op.inner.out_encryptable_notes();
     PendingPoiEntry {
         txid: Txid::from_operation(op),
-        spending_pubkey: op.inner.from.spending_key().public_key(),
+        spending_pubkey: op.inner.from.spending_public_key(),
         nullifying_key: op.inner.from.viewing_key().nullifying_key(),
         utxo_tree_in: op.inner.utxo_tree_number,
         bound_params_hash: op.circuit_inputs.bound_params_hash,
@@ -745,7 +745,7 @@ mod prune_tests {
         };
         let entry = |created_at| PendingPoiEntry {
             txid: Txid::new(&[], &[], U256::ZERO),
-            spending_pubkey: signer.spending_key().public_key(),
+            spending_pubkey: signer.spending_public_key(),
             nullifying_key: signer.viewing_key().nullifying_key(),
             utxo_tree_in: 0,
             bound_params_hash: U256::ZERO,
@@ -759,7 +759,7 @@ mod prune_tests {
             created_at,
         };
         let account = |unspent: Vec<UtxoNote>| RecoveryAccount {
-            spending_pubkey: signer.spending_key().public_key(),
+            spending_pubkey: signer.spending_public_key(),
             nullifying_key: signer.viewing_key().nullifying_key(),
             unspent,
             spent: vec![],
@@ -787,7 +787,7 @@ mod prune_tests {
         // Not one of our accounts: no evidence, keep.
         let stranger = PrivateKeySigner::new_evm(random(), random(), 1);
         let other = RecoveryAccount {
-            spending_pubkey: stranger.spending_key().public_key(),
+            spending_pubkey: stranger.spending_public_key(),
             nullifying_key: stranger.viewing_key().nullifying_key(),
             unspent: vec![note(4)],
             spent: vec![],

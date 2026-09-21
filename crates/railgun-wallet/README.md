@@ -37,8 +37,9 @@ decrypted notes and pending POI entries (which include the nullifying key, see t
 in `poi/provider.rs`). `ephemeral_senders.jsonl` (mode 0600) keeps the key of any 7702 sender
 that funds transit through (native unshield), written before the UserOperation is sent.
 
-The 0zk address shown is scoped to the selected chain (`PrivateKeySigner::new_evm`). Railway
-shows the chain-agnostic form of the same keys; both receive the same notes.
+The 0zk address shown is the chain-agnostic form (`ChainId::All`), the same string Railway
+shows for the same keys. The chain field of an address is advisory only; a chain-scoped
+address of the same keys receives the same notes.
 
 ## API
 

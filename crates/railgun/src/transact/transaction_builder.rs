@@ -577,19 +577,27 @@ async fn prove_operation(
     );
 
     // A dummy build (no prover) must not reach the signer: see `from_inputs_unsigned`.
-    let make_inputs = if prover.is_some() {
-        TransactCircuitInputs::from_inputs
+    let inputs = if prover.is_some() {
+        TransactCircuitInputs::from_inputs(
+            utxo_tree,
+            bound_params.hash(),
+            operation.from.clone(),
+            operation.asset,
+            operation.in_notes(),
+            &operation.out_notes(),
+        )
+        .await?
     } else {
-        TransactCircuitInputs::from_inputs_unsigned
+        TransactCircuitInputs::from_inputs_unsigned(
+            utxo_tree,
+            bound_params.hash(),
+            operation.from.clone(),
+            operation.asset,
+            operation.in_notes(),
+            &operation.out_notes(),
+        )
+        .await?
     };
-    let inputs = make_inputs(
-        utxo_tree,
-        bound_params.hash(),
-        operation.from.clone(),
-        operation.asset,
-        operation.in_notes(),
-        &operation.out_notes(),
-    )?;
     let proof = match prover {
         Some(prover) => prover
             .prove_transact(&inputs)
@@ -757,13 +765,15 @@ mod tests {
         signatures: std::sync::atomic::AtomicUsize,
     }
 
+    #[cfg_attr(native, async_trait::async_trait)]
+    #[cfg_attr(wasm, async_trait::async_trait(?Send))]
     impl RailgunSigner for CountingSigner {
-        fn sign(&self, inputs: U256) -> Result<crate::crypto::keys::SpendingSignature, crate::account::signer::RailgunSignerError> {
+        async fn sign(&self, inputs: U256) -> Result<crate::crypto::keys::SpendingSignature, crate::account::signer::RailgunSignerError> {
             self.signatures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.inner.sign(inputs)
+            self.inner.sign(inputs).await
         }
-        fn spending_key(&self) -> crate::crypto::keys::SpendingKey {
-            self.inner.spending_key()
+        fn spending_public_key(&self) -> crate::crypto::keys::SpendingPublicKey {
+            self.inner.spending_public_key()
         }
         fn viewing_key(&self) -> crate::crypto::keys::ViewingKey {
             self.inner.viewing_key()

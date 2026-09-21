@@ -27,6 +27,7 @@ use eip_1193_provider::tx_data::TxData;
 use railgun::{
     account::{
         address::RailgunAddress,
+        chain::ChainId as RgChainId,
         signer::{PrivateKeySigner as RgSigner, RailgunSigner},
     },
     builder::RailgunBuilder,
@@ -478,7 +479,9 @@ impl Engine {
             (_, Some(s), Some(v)) => (keys::from_hex(s, v)?, "raw"),
             _ => bail!("provide either a mnemonic or both spending and viewing keys"),
         };
-        let signer = RgSigner::new_evm(keys.spending, keys.viewing, chain.id);
+        // Chain-agnostic address, as Railway displays it: the chain field of a 0zk address is
+        // purely advisory, and one address per wallet is less confusing than one per chain.
+        let signer = RgSigner::new(keys.spending, keys.viewing, RgChainId::All);
         let address = signer.address().to_string();
 
         // Public account: an explicit key wins; otherwise the Ethereum account of the same
@@ -534,8 +537,25 @@ impl Engine {
             bail!("RPC is on chain {rpc_chain}, expected {}", chain.id);
         }
 
-        let tag = hex::encode(&Sha256::digest(address.as_bytes())[..8]);
-        let data_dir = self.base_dir.join(chain.id.to_string()).join(tag);
+        // Keyed by the master public key: chain-independent, and stable even if the address
+        // encoding changes again. The chain id already namespaces the directory one level up.
+        let master_key = signer.address().master_key().to_string();
+        let tag = hex::encode(&Sha256::digest(master_key.as_bytes())[..8]);
+        let chain_dir = self.base_dir.join(chain.id.to_string());
+        let data_dir = chain_dir.join(&tag);
+
+        // Directories from before this scheme were keyed by the chain-specific address; rename
+        // so existing wallets keep their synced state instead of resyncing from scratch.
+        let legacy_address =
+            RailgunAddress::from_private_keys(keys.spending, keys.viewing, RgChainId::evm(chain.id))
+                .to_string();
+        let legacy_dir = chain_dir.join(hex::encode(&Sha256::digest(legacy_address.as_bytes())[..8]));
+        if legacy_dir.is_dir() && !data_dir.exists() {
+            std::fs::rename(&legacy_dir, &data_dir).with_context(|| {
+                format!("migrating {} to {}", legacy_dir.display(), data_dir.display())
+            })?;
+            info!(from = %legacy_dir.display(), to = %data_dir.display(), "wallet directory migrated");
+        }
         let db = // v2: accounts keep spent and sent notes, the txid indexer keeps our own operations.
         // A v1 database dropped them at sync time, so it cannot be upgraded in place.
         Arc::new(WalletDb::new(data_dir.join("db-v2"))?);
