@@ -10,10 +10,10 @@ was cut out of `api.rs` by reading it.
 ## What it does
 
 The front is not forked. `static/index.html` talks to the wallet through one function,
-`api(path, body)`, which calls `fetch`. `dist/tauri-shim.js` replaces `fetch` for `/api/*` with
+`api(path, body)`, which calls `fetch`. `front/tauri-shim.js` replaces `fetch` for `/api/*` with
 `invoke("api", { path, body })` and rebuilds a `Response` with the status the daemon would have
-returned, so every error path in the front behaves the same. `mobile.css` is layout only.
-`scripts/build-dist.sh` assembles `dist/` from the desktop `static/` at every build, which is
+returned, so every error path in the front behaves the same. `front/mobile.css` is layout only.
+`scripts/build-dist.sh` assembles `dist/` from `front/` and the desktop `static/` at every build (`dist/` is generated and git-ignored), which is
 what keeps the two hosts from drifting.
 
 On the Rust side, `ipc::dispatch` is the API with no transport (ADR-024), `axum` moves behind a
@@ -23,7 +23,20 @@ feature, and the Tauri host calls the dispatch directly (ADR-025). `engine.rs`, 
 js-waku runs inside the WebView, as it runs in the tab on desktop, so the legacy transport is
 possible on Android as soon as the process is kept alive (ADR-028).
 
-## Build
+## Build without installing anything
+
+`.github/workflows/android-apk.yml` builds the APK on a GitHub runner (ADR-031). Run it from the
+Actions tab, or push the branch. It generates `gen/android` and the icons on the first run and
+uploads them as an artifact: commit both, and later runs skip that step.
+
+On the phone: download `railgun-wallet-apk` from the run's artifacts, unzip it, open the `.apk`,
+allow installation from unknown sources. The signature changes between runs, so uninstall the
+previous build before installing a new one.
+
+The APK is debug-signed and built with the `dev` profile, with dependencies optimised
+(`[profile.dev.package."*"]` in the workspace root), so proving times are meaningful.
+
+## Build locally, if the toolchain is installed anyway
 
 Toolchain, once:
 

@@ -1,0 +1,37 @@
+/* Phone overlay on top of the desktop front. Layout only: no id or class is renamed, so
+   static/index.html stays the single source of the UI (ADR-024). */
+
+html { font-size: 16px; }          /* under 16px Android zooms on focus */
+main { padding: .8rem .8rem 6.5rem; }
+header.bar { padding: .7rem .8rem; position: sticky; top: 0; z-index: 3; background: var(--paper); }
+section { padding: .8rem .8rem; margin-bottom: .8rem; }
+
+/* One column everywhere, stacked rail. */
+.layout { grid-template-columns: 1fr; gap: .8rem; }
+.rail { grid-template-columns: 1fr; }
+.rail .track { flex-direction: row; justify-content: space-around; }
+.row { grid-template-columns: 1fr; gap: .4rem; }
+
+/* Touch targets: 44 px minimum on anything tappable. */
+button, .tabs button { min-height: 44px; padding: .6rem 1rem; }
+input[type=text], input[type=password], input[type=number], select { min-height: 44px; }
+.check input { min-width: 22px; min-height: 22px; }
+.tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+
+/* A 127-character 0zk address must not push the page sideways. */
+.addr, .job .res, pre.log { overflow-wrap: anywhere; }
+table { display: block; overflow-x: auto; }
+pre.log { max-height: 11rem; font-size: .72rem; }
+
+/* Expert fields collapsed by default: gas margin, fee ceilings, trusted signers, direct
+   transport. The front renders them inside <details> in the mobile build. */
+details.advanced > summary { min-height: 44px; display: flex; align-items: center; }
+
+/* Sticky action bar so the primary button is always in thumb reach. */
+.actions {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 4;
+  margin: 0; padding: .7rem .8rem calc(.7rem + env(safe-area-inset-bottom));
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+.actions button { flex: 1; }
