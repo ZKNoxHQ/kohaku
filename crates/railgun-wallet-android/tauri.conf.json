@@ -4,7 +4,7 @@
   "version": "0.11.0",
   "identifier": "com.zknox.railgunwallet",
   "build": {
-    "frontendDist": "../dist",
+    "frontendDist": "dist",
     "beforeBuildCommand": "sh scripts/build-dist.sh",
     "beforeDevCommand": "sh scripts/build-dist.sh"
   },
@@ -24,7 +24,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.png"
+    ],
     "android": {
       "minSdkVersion": 26
     }

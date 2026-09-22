@@ -38,7 +38,7 @@ jobs:
 
       - name: tauri-cli
         run: |
-          cargo install tauri-cli --version '^2' --locked || true
+          cargo install tauri-cli --version '^2' --locked
           cargo tauri --version
 
       - name: front (dist/)
@@ -50,8 +50,7 @@ jobs:
         run: |
           set -eu
           if [ ! -d icons ]; then
-            # Placeholder in the front's shielded colour until a real one is committed.
-            convert -size 1024x1024 xc:'#0d6e6e' /tmp/icon.png
+            python3 scripts/placeholder-icon.py /tmp/icon.png
             cargo tauri icon /tmp/icon.png
           fi
 
