@@ -1,0 +1,5 @@
+# produced by `cargo tauri android init`, then edited by hand: commit it once it exists
+# and you have merged android/AndroidManifest.additions.xml + android/EngineService.kt into it.
+/gen/android/.gradle
+/gen/android/app/build
+/gen/android/build

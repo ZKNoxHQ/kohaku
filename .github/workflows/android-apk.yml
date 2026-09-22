@@ -1,0 +1,90 @@
+name: android apk
+
+# Builds an installable APK without any local Android toolchain. Manual trigger, plus every push
+# on the Android branch. The artifact is downloaded on the phone and installed from there.
+on:
+  workflow_dispatch:
+  push:
+    branches: [zknox/railgun-wallet-android]
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK and NDK
+        run: |
+          set -eu
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ndk" >> "$GITHUB_ENV"
+          echo "using $ndk"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-apk
+
+      - name: tauri-cli
+        run: |
+          cargo install tauri-cli --version '^2' --locked || true
+          cargo tauri --version
+
+      - name: front (dist/)
+        working-directory: crates/railgun-wallet-android
+        run: sh scripts/build-dist.sh
+
+      - name: icons
+        working-directory: crates/railgun-wallet-android
+        run: |
+          set -eu
+          if [ ! -d icons ]; then
+            # Placeholder in the front's shielded colour until a real one is committed.
+            convert -size 1024x1024 xc:'#0d6e6e' /tmp/icon.png
+            cargo tauri icon /tmp/icon.png
+          fi
+
+      - name: android project
+        working-directory: crates/railgun-wallet-android
+        run: |
+          set -eu
+          [ -d gen/android ] || cargo tauri android init --skip-targets-install
+          python3 scripts/patch-android-project.py
+
+      - name: build
+        working-directory: crates/railgun-wallet-android
+        run: cargo tauri android build --apk --debug --target aarch64
+
+      - name: collect
+        run: |
+          set -eu
+          mkdir -p out
+          find crates/railgun-wallet-android/gen/android -name '*.apk' -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: railgun-wallet-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      # First run only: gen/android is generated here, commit it so the build stops depending on
+      # the template and the manifest patch becomes a one-off.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gen-android
+          path: |
+            crates/railgun-wallet-android/gen
+            crates/railgun-wallet-android/icons
+          if-no-files-found: warn

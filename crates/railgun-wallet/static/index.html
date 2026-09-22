@@ -252,10 +252,10 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
           <div id="aa-options" hidden>
             <label class="check"><input type="checkbox" id="aa-single"> Prove once (one signature per operation, for hardware and threshold signers)</label>
             <div class="row" id="aa-margin-row" hidden>
-              <div><label for="aa-margin">Gas margin (%)</label><input type="number" id="aa-margin" min="0" max="200" value="25"></div>
+              <div><label for="aa-margin">Gas margin (%)</label><input type="number" id="aa-margin" min="0" max="200" value="12"></div>
               <div><label class="check" style="margin-top:1.9rem"><input type="checkbox" id="aa-strict"> Never fall back to several signatures</label></div>
             </div>
-            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once measures the gas first: the exact transaction is simulated with a dummy proof, nothing is signed, and the limits are set from that plus this margin. You pay the margin, nothing is refunded. The RPC must support state overrides in eth_call; if it does not, the wallet falls back to the default path unless the box above is ticked, in which case it stops before any signature. If the limits turn out too low after proving, the operation stops before anything is sent.</p>
+            <p class="hint">By default the proof is regenerated until the fee matches the bundler's estimate within 1%, which asks the signer up to five times. Proving once measures the gas first: the exact transaction is simulated with a dummy proof, nothing is signed, and the limits are set from that plus this margin (12% by default: the paymaster validation needs about 8% more than the simulation sees it use). You pay the margin, nothing is refunded. The RPC must support state overrides in eth_call; if it does not, the wallet falls back to the default path unless the box above is ticked, in which case it stops before any signature. If the limits turn out too low after proving, the operation stops before anything is sent.</p>
           </div>
           <div id="legacy-limits" hidden>
             <div class="row">
@@ -683,6 +683,8 @@ try { $("aa-single").checked = localStorage.getItem("rgw:aa-single") === "1"; } 
 try { $("aa-strict").checked = localStorage.getItem("rgw:aa-strict") === "1"; } catch {}
 $("aa-strict").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-strict", $("aa-strict").checked ? "1" : "0"); } catch {} });
 $("aa-single").addEventListener("change", () => { try { localStorage.setItem("rgw:aa-single", $("aa-single").checked ? "1" : "0"); } catch {} render(); });
+// The margin default went from 25 to 12 in 0.10.1: a stored 25 is the old default, not a choice.
+try { if (localStorage.getItem("rgw:aa-margin") === "25" && !localStorage.getItem("rgw:aa-margin-v2")) localStorage.removeItem("rgw:aa-margin"); localStorage.setItem("rgw:aa-margin-v2", "1"); } catch {}
 for (const id of ["l-rate", "l-maxfee", "aa-margin"]) {
   try { const v = localStorage.getItem("rgw:" + id); if (v !== null && v !== "") $(id).value = v; } catch {}
   $(id).addEventListener("input", () => { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} render(); });
