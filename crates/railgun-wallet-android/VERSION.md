@@ -1,23 +1,5 @@
 # Changelog
 
-## 0.11.1 (2026-09-22)
-
-APK built in CI, so the Android toolchain is not needed locally (ADR-031).
-
-* `.github/workflows/android-apk.yml`: JDK 17, the runner's SDK and NDK, `aarch64-linux-android`,
-  `build-dist.sh`, placeholder icons, `cargo tauri android init` if `gen/android` is absent, then
-  `cargo tauri android build --apk --debug --target aarch64`. The APK is an artifact, downloaded
-  and installed from the phone. `gen/android` and `icons/` are uploaded too: commit them after
-  the first run and the generation step disappears.
-* `scripts/patch-android-project.py` merges into the generated project what `android init` cannot
-  know: the permissions, the `dataSync` service, `configChanges` and `singleTask` on the activity
-  and `EngineService.kt`. Idempotent, verified on a template manifest, output parses as XML.
-* Workspace root: dependencies optimised in the `dev` profile. A debug-signed APK is what CI can
-  produce without a keystore, and a debug-profile Groth16 prover would measure nothing.
-
-Signature caveat: Gradle generates a fresh debug keystore per runner, so the app has to be
-uninstalled before a newer build is installed.
-
 ## 0.11.0 (2026-09-22)
 
 First Android host. Skeleton: it has never been compiled, the workspace snapshot it was written
@@ -41,3 +23,7 @@ members are absent). Treat every file here as a starting point to `cargo check`,
   `EngineService.kt`, to merge into `gen/android` after `cargo tauri android init`.
 * `keystore.rs` is three commands that return an error. The sealing of the phrase by Android
   Keystore is specified in ADR-026 and deliberately not approximated.
+
+Not addressed here, in order of risk: proving time and peak RAM on a phone, where the zkeys come
+from and how much storage they take, sync duration on mainnet, POI submission while the app is
+backgrounded, and the WebView keeping the Waku node alive under Doze.

@@ -23,20 +23,7 @@ feature, and the Tauri host calls the dispatch directly (ADR-025). `engine.rs`, 
 js-waku runs inside the WebView, as it runs in the tab on desktop, so the legacy transport is
 possible on Android as soon as the process is kept alive (ADR-028).
 
-## Build without installing anything
-
-`.github/workflows/android-apk.yml` builds the APK on a GitHub runner (ADR-031). Run it from the
-Actions tab, or push the branch. It generates `gen/android` and the icons on the first run and
-uploads them as an artifact: commit both, and later runs skip that step.
-
-On the phone: download `railgun-wallet-apk` from the run's artifacts, unzip it, open the `.apk`,
-allow installation from unknown sources. The signature changes between runs, so uninstall the
-previous build before installing a new one.
-
-The APK is debug-signed and built with the `dev` profile, with dependencies optimised
-(`[profile.dev.package."*"]` in the workspace root), so proving times are meaningful.
-
-## Build locally, if the toolchain is installed anyway
+## Build
 
 Toolchain, once:
 
