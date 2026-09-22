@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     account::{address::RailgunAddress, chain::ChainId},
-    crypto::keys::{SpendingKey, SpendingSignature, ViewingKey},
+    crypto::keys::{MasterPublicKey, SpendingKey, SpendingPublicKey, SpendingSignature, ViewingKey},
 };
 
 use common::MaybeSend;
@@ -17,8 +17,23 @@ pub trait RailgunSigner: MaybeSend {
     fn spending_key(&self) -> SpendingKey;
     fn sign(&self, inputs: U256) -> Result<SpendingSignature, RailgunSignerError>;
 
+    /// ZKNOX fork: public spending key. Signers without the private key (view-only) override it.
+    fn spending_pubkey(&self) -> SpendingPublicKey {
+        self.spending_key().public_key()
+    }
+
+    /// ZKNOX fork: master public key. A view-only signer built from a 0zk address overrides it,
+    /// since the address carries the master key but not the spending public key.
+    fn master_public_key(&self) -> MasterPublicKey {
+        MasterPublicKey::new(self.spending_pubkey(), self.viewing_key().nullifying_key())
+    }
+
     fn address(&self) -> RailgunAddress {
-        RailgunAddress::from_private_keys(self.spending_key(), self.viewing_key(), self.chain_id())
+        RailgunAddress::from_public_keys(
+            self.master_public_key(),
+            self.viewing_key().public_key(),
+            self.chain_id(),
+        )
     }
 }
 
@@ -32,6 +47,13 @@ pub struct PrivateKeySigner {
 #[derive(Debug, Error)]
 #[error("Signing error: {0}")]
 pub struct RailgunSignerError(#[source] Box<dyn std::error::Error + Send + Sync>);
+
+impl RailgunSignerError {
+    /// ZKNOX fork: error constructor for signer implementations outside this crate.
+    pub fn new(message: impl Into<String>) -> Self {
+        RailgunSignerError(message.into().into())
+    }
+}
 
 impl PrivateKeySigner {
     pub fn new(spending_key: SpendingKey, viewing_key: ViewingKey, chain_id: ChainId) -> Arc<Self> {

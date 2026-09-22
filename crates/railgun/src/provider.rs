@@ -211,6 +211,36 @@ impl RailgunProvider {
             .unwrap_or_default()
     }
 
+    /// ZKNOX viewer: full state of a registered account (unspent, spent and sent notes).
+    pub fn account_state(&self, address: RailgunAddress) -> Option<IndexedAccountState> {
+        self.utxo_indexer.account_state(address)
+    }
+
+    /// ZKNOX viewer: our own operations as kept by the txid indexer (POI enabled only), keyed
+    /// by the railgun txid as `0x` + 64 hex digits.
+    pub fn own_operations(&self) -> Vec<(String, Operation)> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| {
+                p.own_operations()
+                    .into_iter()
+                    .map(|(txid, op)| {
+                        let raw: U256 = txid.into();
+                        (format!("0x{raw:064x}"), op)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// ZKNOX viewer: POI status per list keyed by blinded commitment (`0x` + 64 hex digits).
+    pub fn poi_statuses(&self) -> Vec<(String, Vec<(String, Option<PoiStatus>)>)> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| p.statuses())
+            .unwrap_or_default()
+    }
+
     // ---- end ZKNOX fork ----
 
     /// Register a signer with the provider. The provider will index and track
@@ -842,3 +872,7 @@ mod abi {
     );
 }
 
+
+// ZKNOX viewer: read-model types re-exported for crates that do not reach into the indexer modules.
+pub use crate::indexer::indexed_account::IndexedAccountState;
+pub use crate::indexer::syncer::Operation;

@@ -113,7 +113,7 @@ impl UtxoIndexer {
             .map(|a| {
                 let signer = a.signer();
                 crate::poi::recovery::RecoveryAccount {
-                    spending_pubkey: signer.spending_key().public_key(),
+                    spending_pubkey: signer.spending_pubkey(),
                     nullifying_key: signer.viewing_key().nullifying_key(),
                     unspent: a.unspent(),
                     spent: a.spent(),
@@ -121,6 +121,17 @@ impl UtxoIndexer {
                 }
             })
             .collect()
+    }
+
+    /// ZKNOX viewer: full state (unspent, spent and sent notes) of a registered account.
+    pub fn account_state(
+        &self,
+        address: RailgunAddress,
+    ) -> Option<crate::indexer::indexed_account::IndexedAccountState> {
+        self.accounts
+            .iter()
+            .find(|a| a.address() == address)
+            .map(|a| a.state())
     }
 
     pub fn registered(&self) -> Vec<RailgunAddress> {

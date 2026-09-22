@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Railgun viewer · ZKNOX</title>
+<meta name="robots" content="noindex"/>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@10..48,400;10..48,600;10..48,700;10..48,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root{
+    --bleu:#000091; --rouge:#E1000F; --blanc:#fff; --creme:#F5F5FE; --papier:#FBFBFF;
+    --encre:#16161D; --gris:#6A6AF4; --or:#FFC400; --vert:#0F6E56; --ambre:#B8860B;
+    --ligne:rgba(0,0,145,.1); --ligne2:rgba(0,0,145,.18);
+    --ombre:0 1px 0 rgba(0,0,145,.05),0 14px 40px -18px rgba(0,0,145,.30);
+    --rad:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--encre);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;
+    background:radial-gradient(1200px 600px at 85% -10%,rgba(225,0,15,.06),transparent 60%),radial-gradient(1000px 620px at -5% 108%,rgba(0,0,145,.07),transparent 55%),var(--creme)}
+  .wrap{max-width:1500px;margin:0 auto;padding:20px 18px 60px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+  .marque{display:flex;align-items:center;gap:12px;min-width:0}
+  .cocarde-txt{width:40px;height:40px;flex:none;border-radius:50%;background:var(--bleu);color:#fff;display:flex;align-items:center;justify-content:center;font:800 18px 'Bricolage Grotesque',sans-serif;box-shadow:0 4px 14px -4px rgba(0,0,145,.5),0 0 0 2px var(--blanc)}
+  .titre{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:1.25rem;letter-spacing:-.02em}
+  .sous{font-size:.8rem;color:#55557a}
+  .sp{flex:1}
+  .ver{font-size:.68rem;color:#8a8aa5;font-family:'JetBrains Mono',monospace}
+  .carte{background:var(--papier);border:1px solid var(--ligne);border-radius:var(--rad);box-shadow:var(--ombre)}
+  .sensitive{filter:blur(6px);cursor:pointer;transition:filter .15s;user-select:none}
+  .sensitive.revealed{filter:none;user-select:text}
+  .vw-form{padding:16px 18px;margin-bottom:14px}
+  .vw-grid{display:grid;grid-template-columns:150px 1fr 220px 1fr;gap:10px;margin-bottom:10px}
+  @media(max-width:1000px){.vw-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:600px){.vw-grid{grid-template-columns:1fr}}
+  .vw-form label{display:flex;flex-direction:column;gap:4px;font-size:.72rem;color:#55557a;font-weight:600;letter-spacing:.02em}
+  .vw-form input,.vw-form select{border:1px solid var(--ligne2);border-radius:9px;padding:8px 10px;font:inherit;font-size:.82rem;background:var(--blanc);color:var(--encre);font-family:'JetBrains Mono',monospace}
+  .vw-form input:disabled,.vw-form select:disabled{opacity:.6}
+  .vw-key{margin-bottom:10px}
+  .vw-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .vw-actions button,.vw-mn button,.vw-loghead button{border:none;border-radius:9px;padding:9px 14px;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;background:var(--bleu);color:#fff;transition:.15s}
+  .vw-actions button.ghost,.vw-mn button.ghost,.vw-loghead button.ghost{background:var(--creme);color:var(--bleu);border:1px solid var(--ligne2)}
+  .vw-actions button:disabled{opacity:.5;cursor:default}
+  .vw-details{font-size:.78rem}
+  .vw-details summary{cursor:pointer;color:var(--bleu);font-weight:600;padding:8px 4px}
+  .vw-mn{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0 4px}
+  .vw-mn input{flex:1;min-width:280px;border:1px solid var(--ligne2);border-radius:9px;padding:8px 10px;font:inherit;font-size:.82rem;font-family:'JetBrains Mono',monospace}
+  .vw-note{flex-basis:100%;font-size:.72rem;color:#7a7a99}
+  .vw-strip{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;font-size:.78rem;color:#55557a;align-items:center}
+  .vw-strip code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:1px 6px;word-break:break-all}
+  .vw-status{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#8a8aa5;flex-basis:100%}
+  .vw-all{font:11px 'JetBrains Mono',monospace;color:#3a3a52;white-space:pre-wrap;margin-top:6px}
+  .vw-all:empty{display:none}
+  .vw-log{margin-top:14px;padding:12px 16px}
+  .vw-loghead{display:flex;justify-content:space-between;align-items:center;font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#55557a;font-weight:600;margin-bottom:6px}
+  .vw-loghead button{padding:4px 10px;font-size:.72rem}
+  #log{font:11px 'JetBrains Mono',monospace;white-space:pre-wrap;max-height:220px;overflow:auto;color:#3a3a52}
+
+  /* ---------------- Onglets (v1.9.0) ---------------- */
+  .onglets{display:none;gap:6px;margin:-6px 0 16px;border-bottom:1px solid var(--ligne2);padding-bottom:0}
+  .onglets.show{display:flex}
+  .onglets button{border:none;background:transparent;font:inherit;font-weight:600;font-size:.88rem;color:#55557a;padding:10px 14px;cursor:pointer;
+    border-bottom:3px solid transparent;margin-bottom:-1px;display:inline-flex;align-items:center;gap:8px;transition:.15s}
+  .onglets button svg{width:16px;height:16px}
+  .onglets button:hover{color:var(--bleu)}
+  .onglets button.on{color:var(--bleu);border-bottom-color:var(--bleu)}
+  .onglets .sp{flex:1}
+  .onglets .ver{font-size:.68rem;color:#8a8aa5;align-self:center;font-family:'JetBrains Mono',monospace}
+
+  /* ---------------- Arbre des notes ---------------- */
+  #notes{display:none}
+  #notes.show{display:block}
+  .nx-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}
+  @media(max-width:900px){.nx-wrap{grid-template-columns:1fr}}
+  .nx-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 14px;margin-bottom:12px}
+  .nx-bar select,.nx-bar input[type=text]{border:1px solid var(--ligne2);border-radius:9px;padding:7px 10px;font:inherit;font-size:.8rem;background:var(--blanc);color:var(--encre)}
+  .nx-bar input[type=text]{min-width:190px;font-family:'JetBrains Mono',monospace}
+  .nx-bar label.ck{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:#55557a;cursor:pointer;user-select:none}
+  .nx-bar label.ck input{accent-color:var(--bleu)}
+  .nx-bar .sep{width:1px;height:22px;background:var(--ligne2);margin:0 2px}
+  .nx-bar button{border:none;border-radius:9px;padding:8px 12px;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer;background:var(--bleu);color:#fff;transition:.15s}
+  .nx-bar button.ghost{background:var(--creme);color:var(--bleu);border:1px solid var(--ligne2)}
+  .nx-bar button:hover{filter:brightness(1.08)}
+  .nx-status{font-size:.74rem;color:#7a7a99;margin-left:auto;font-family:'JetBrains Mono',monospace;max-width:100%}
+  .nx-status.err{color:var(--rouge)}
+  .nx-canvas{height:min(72vh,760px);min-height:380px;position:relative;overflow:hidden;background:
+    radial-gradient(circle at 1px 1px,rgba(0,0,145,.09) 1px,transparent 1.5px) 0 0/22px 22px,var(--papier);cursor:grab;border-radius:var(--rad)}
+  .nx-canvas:active{cursor:grabbing}
+  .nx-canvas svg{display:block;width:100%;height:100%}
+  .nx-canvas .edge{fill:none;stroke:#9a9ab5;opacity:.85;transition:opacity .15s}
+  .nx-canvas .edge.ghost{stroke-dasharray:3 3}
+  .nx-canvas .edge.taint{stroke:var(--rouge)}
+  .nx-canvas .lab{font:10px 'JetBrains Mono',ui-monospace,monospace;fill:#3a3a52;text-anchor:middle;pointer-events:none}
+  .nx-canvas .lab.tx{fill:var(--bleu)}
+  .nx-canvas .lab.ghost{fill:#8a8aa5}
+  .nx-canvas .glyph{font:700 10px 'Inter',system-ui,sans-serif;text-anchor:middle;pointer-events:none}
+  .nx-canvas .bandlab{font:600 11px 'Inter',system-ui,sans-serif;fill:#55557a}
+  .nx-canvas g.nd{cursor:pointer;outline:none}
+  .nx-canvas g.nd .core{transition:filter .15s}
+  .nx-canvas g.nd:hover .core,.nx-canvas g.nd:focus-visible .core{filter:drop-shadow(0 0 6px rgba(0,0,145,.55))}
+  .nx-canvas g.nd.sel .core,.nx-canvas g.nd.sel polygon,.nx-canvas g.nd.sel rect{filter:drop-shadow(0 0 0 3px var(--or)) drop-shadow(0 0 8px rgba(255,196,0,.9))}
+  .nx-canvas svg.hl g.nd:not(.lit){opacity:.18}
+  .nx-canvas svg.hl path.edge:not(.lit){opacity:.08}
+  .nx-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .nx-panel{padding:14px 16px;font-size:.8rem;max-height:min(46vh,480px);overflow:auto}
+  .nx-panel h3{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:1rem;letter-spacing:-.01em;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nx-panel h3 code{font-size:.78rem;font-weight:500}
+  .nx-panel h4{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:#55557a;font-weight:600;margin-bottom:8px}
+  .nx-row{display:grid;grid-template-columns:118px 1fr;gap:8px;padding:5px 0;border-bottom:1px solid var(--ligne);align-items:start}
+  .nx-row:last-child{border-bottom:0}
+  .nx-k{color:#7a7a99;font-size:.72rem;padding-top:2px}
+  .nx-v{min-width:0;word-break:break-all}
+  .nx-v code,.nx-panel code{font-family:'JetBrains Mono',monospace;font-size:.72rem;background:var(--creme);border-radius:5px;padding:1px 5px}
+  .nx-v a{color:var(--bleu);font-weight:600}
+  .nx-dim{color:#8a8aa5;font-size:.7rem}
+  .nx-warn{color:var(--rouge);font-weight:600}
+  .nx-empty{color:#9a9ab5;font-size:.82rem;padding:10px 0}
+  .nx-sens{display:inline-block;position:relative}
+  .poi-chip{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:999px;background:#eee;color:#666;margin:1px 2px 1px 0;font-family:'JetBrains Mono',monospace}
+  .poi-chip.Valid{background:rgba(15,110,86,.13);color:var(--vert)}
+  .poi-chip.ProofSubmitted{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .poi-chip.Missing{background:rgba(225,0,15,.1);color:var(--rouge)}
+  .poi-chip.ShieldBlocked{background:#16161D;color:#fff}
+  .bk{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--creme);color:var(--bleu)}
+  .bk.Spendable{background:rgba(15,110,86,.13);color:var(--vert)}
+  .bk.Spent{background:#eee;color:#666}
+  .bk.ShieldBlocked{background:#16161D;color:#fff}
+  .bk.MissingInternalPOI,.bk.MissingExternalPOI{background:rgba(225,0,15,.1);color:var(--rouge)}
+  .bk.ShieldPending,.bk.ProofSubmitted{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .nx-stats{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;margin-bottom:12px}
+  .nx-stats .st{display:flex;flex-direction:column;background:var(--blanc);border:1px solid var(--ligne);border-radius:10px;padding:6px 10px;min-width:74px}
+  .nx-stats .st b{font-family:'Bricolage Grotesque',sans-serif;font-size:1.05rem;font-variant-numeric:tabular-nums;line-height:1.1}
+  .nx-stats .st span{font-size:.66rem;color:#7a7a99}
+  .nx-stats .st.tok b{color:var(--bleu)}
+  .nx-stats .st.high{border-color:rgba(225,0,15,.4);background:rgba(225,0,15,.05)}.nx-stats .st.high b{color:var(--rouge)}
+  .nx-stats .st.warn{border-color:rgba(184,134,11,.4);background:rgba(184,134,11,.06)}.nx-stats .st.warn b{color:var(--ambre)}
+  .an{display:flex;align-items:flex-start;gap:8px;padding:7px 6px;border-radius:9px;cursor:pointer;font-size:.76rem;border-bottom:1px solid var(--ligne)}
+  .an:hover{background:var(--creme)}
+  .an .an-msg{flex:1}
+  .an .an-n{font-size:.66rem;color:#8a8aa5;font-family:'JetBrains Mono',monospace;padding-top:2px}
+  .an-chip{font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:6px;font-family:'JetBrains Mono',monospace;white-space:nowrap;flex:none}
+  .an-chip.high{background:rgba(225,0,15,.12);color:var(--rouge)}
+  .an-chip.warn{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .an-chip.info{background:var(--creme);color:var(--bleu)}
+  .nx-legend{display:flex;flex-wrap:wrap;gap:10px 16px;padding:10px 14px;font-size:.72rem;color:#55557a}
+  .nx-legend span{display:inline-flex;align-items:center;gap:6px}
+  .nx-legend i{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #16161D;background:var(--bleu)}
+  .nx-legend i.ext{background:#fff;border:2px dashed var(--bleu)}
+  .nx-legend i.tx{border-radius:2px;transform:rotate(45deg);background:#fff;border:2px solid var(--bleu);width:10px;height:10px}
+  .nx-legend i.sh{border-radius:3px;background:var(--rouge);border-color:var(--rouge)}
+  .nx-legend i.un{border-radius:4px;width:18px;height:11px;background:#fff;border:2px solid var(--bleu)}
+  .nx-legend i.gh{background:#fff;border:2px dashed #9a9ab5}
+  .nx-legend i.pv{background:#fff;border:3px solid var(--vert)}
+  .nx-legend i.pp{background:#fff;border:3px solid var(--ambre)}
+  .nx-legend i.pm{background:#fff;border:3px solid var(--rouge)}
+  .nx-legend i.pb{background:#fff;border:3px solid #16161D}
+  .nx-legend i.tn{background:#fff;border:2px dashed var(--rouge)}
+  .view{display:none}.view.show{display:block}
+  .vw-opts{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding-top:4px}
+  .vw-opts .ck{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:#55557a;font-weight:500;flex-direction:row}
+  .vw-opts select,.vw-opts input{padding:4px 6px;font-size:.78rem}
+  .vw-key{margin-bottom:10px;display:grid;gap:8px}
+  .badge{display:inline-block;min-width:18px;padding:1px 6px;border-radius:999px;background:var(--rouge);color:#fff;font-size:.66rem;font-weight:700;margin-left:4px}
+  .tbl-wrap{padding:6px 8px;overflow:auto;max-height:min(72vh,760px)}
+  .tbl{width:100%;border-collapse:collapse;font-size:.78rem}
+  .tbl th{position:sticky;top:0;background:var(--papier);text-align:left;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:#55557a;padding:8px 8px;border-bottom:1px solid var(--ligne2)}
+  .tbl td{padding:8px 8px;border-bottom:1px solid var(--ligne);vertical-align:top}
+  .tbl tr{cursor:pointer}.tbl tr:hover td{background:var(--creme)}.tbl tr.sel td{background:rgba(255,196,0,.14)}
+  .tbl .dim,.nx-panel .dim{color:#8a8aa5;font-size:.68rem}
+  .kind{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--creme);color:var(--bleu)}
+  .kind.shield{background:rgba(225,0,15,.1);color:var(--rouge)}.kind.unshield{background:rgba(15,110,86,.13);color:var(--vert)}.kind.receive{background:rgba(184,134,11,.16);color:var(--ambre)}
+  .memo{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:#3a3a52}
+  .memo-box{background:rgba(255,196,0,.14);border:1px solid rgba(255,196,0,.5);border-radius:10px;padding:8px 10px;margin-bottom:10px;font-family:'JetBrains Mono',monospace;font-size:.78rem;white-space:pre-wrap}
+  hr.sep{border:0;border-top:1px dashed var(--ligne2);margin:6px 0}
+  .poi-panel{max-height:none;margin-bottom:12px}
+  .poi-chip.Unknown{background:#eee;color:#888}
+  #notes .nx-bar #nxSync{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="marque">
+      <div class="cocarde-txt">R</div>
+      <div>
+        <div class="titre">Railgun viewer</div>
+        <div class="sous">Historique et lignée des notes, en lecture seule. Mnémonique ou clé de visualisation. Jamais d’envoi.</div>
+      </div>
+    </div>
+    <span class="sp"></span>
+    <span class="ver" id="vwVer">railgun-viewer</span>
+  </header>
+
+  <div class="carte vw-form" id="vwForm">
+    <div class="vw-grid">
+      <label>Réseau
+        <select id="vwNet"><option value="11155111">Sepolia</option><option value="1">Ethereum mainnet</option></select>
+      </label>
+      <label>RPC (vide = public)
+        <input type="text" id="vwRpc" placeholder="https://sepolia.infura.io/v3/…" spellcheck="false"/>
+      </label>
+      <label>Source des clés
+        <select id="vwMode">
+          <option value="mnemonic">Mnémonique (dérive les deux clés)</option>
+          <option value="viewing">Clé de visualisation privée + adresse 0zk</option>
+          <option value="shareable">Clé de visualisation partageable (engine Railgun)</option>
+        </select>
+      </label>
+      <label>Options
+        <span class="vw-opts">
+          <label class="ck"><input type="checkbox" id="vwPoi" checked/> POI (statuts + txid-tree)</label>
+          <label class="ck" id="vwDerivWrap">dérivation <select id="vwDeriv"><option value="railgun">railgun</option><option value="kohaku">kohaku</option></select> index <input type="number" id="vwIndex" value="0" min="0" style="width:64px"/></label>
+        </span>
+      </label>
+    </div>
+    <div class="vw-key" data-mode="mnemonic"><label>Mnémonique<input type="password" id="vwMnemonic" placeholder="12 ou 24 mots" spellcheck="false" autocomplete="off"/></label></div>
+    <div class="vw-key" data-mode="viewing" hidden>
+      <label>Clé de visualisation privée (32 octets hex)<input type="password" id="vwViewing" placeholder="0x…" spellcheck="false" autocomplete="off"/></label>
+      <label>Adresse 0zk (porte le master public key)<input type="text" id="vwAddress" placeholder="0zk1…" spellcheck="false"/></label>
+    </div>
+    <div class="vw-key" data-mode="shareable" hidden><label>Clé partageable (hex msgpack {vpriv, spub})<input type="password" id="vwShareable" placeholder="export « Clé de visualisation (view-only) » du harness NOXAKU" spellcheck="false" autocomplete="off"/></label></div>
+    <div class="vw-actions">
+      <button id="vwLoad">Charger</button>
+      <button class="ghost" id="vwShow" type="button">Afficher / masquer</button>
+      <span class="sp"></span>
+      <button class="ghost" id="sync" type="button" disabled>Resynchroniser</button>
+      <button class="ghost" id="vwLock" type="button" disabled>Verrouiller</button>
+    </div>
+    <div class="vw-strip">
+      <span>0zk : <code id="zk">—</code></span>
+      <span>mode : <b id="vwModeOut">—</b></span>
+      <span>bloc : <b id="scan">—</b></span>
+      <span class="vw-status" id="status"></span>
+    </div>
+  </div>
+
+  <nav class="onglets show" id="onglets">
+    <button type="button" data-view="hist" class="on">Historique</button>
+    <button type="button" data-view="notes">Arbre des notes</button>
+    <button type="button" data-view="poi">POI manquantes <span class="badge" id="poiBadge">0</span></button>
+  </nav>
+
+  <div id="hist" class="view show">
+    <div class="carte nx-stats" id="hStats"></div>
+    <div class="nx-wrap">
+      <div class="carte tbl-wrap">
+        <table class="tbl" id="hTable">
+          <thead><tr><th>Date</th><th>Type</th><th>Montants</th><th>POI</th><th>Tx</th><th>Mémo</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="nx-empty" id="hEmpty">Charge un wallet pour voir son historique.</div>
+      </div>
+      <div class="nx-side"><div class="carte nx-panel" id="hDetail"><div class="nx-empty">Clique une transaction.</div></div></div>
+    </div>
+  </div>
+
+  <div id="notes">
+    <div class="carte nx-bar">
+      <select id="nxTok" title="Jeton"><option value="">Tous les jetons</option></select>
+      <select id="nxPoi" title="Statut POI (sur au moins une liste)">
+        <option value="any">POI : tous</option>
+        <option value="Valid">POI : valide</option>
+        <option value="ProofSubmitted">POI : preuve soumise</option>
+        <option value="Missing">POI : manquante</option>
+        <option value="ShieldBlocked">POI : bloquée</option>
+        <option value="none">POI : inconnue</option>
+      </select>
+      <select id="nxMode" title="Disposition">
+        <option value="layered">Disposition : couches</option>
+        <option value="time">Disposition : temps (blocs)</option>
+      </select>
+      <label class="ck"><input type="checkbox" id="nxSpent" checked/> dépensées</label>
+      <label class="ck"><input type="checkbox" id="nxExt" checked/> sorties tierces</label>
+      <label class="ck"><input type="checkbox" id="nxCollapse"/> replier les chaînes de change</label>
+      <label class="ck"><input type="checkbox" id="nxLabels" checked/> libellés</label>
+      <span class="sep"></span>
+      <input type="text" id="nxSearch" placeholder="hash / txid / nullifier…" spellcheck="false"/>
+      <button class="ghost" id="nxSearchBtn" type="button">Chercher</button>
+      <span class="sep"></span>
+      <button id="nxRefresh" type="button" title="Relire l’état local de l’engine">Rafraîchir</button>
+      <button class="ghost" id="nxSync" type="button" title="Lance la synchronisation du moteur (scan + POI)">Synchroniser</button>
+      <button class="ghost" id="nxFit" type="button">Ajuster</button>
+      <button class="ghost" id="nxJson" type="button" title="Snapshot + graphe + anomalies (random masqué)">Export JSON</button>
+      <button class="ghost" id="nxSvgExp" type="button">Export SVG</button>
+      <span class="nx-status" id="nxStatus"></span>
+    </div>
+    <div class="carte nx-stats" id="nxStats"></div>
+    <div class="nx-wrap">
+      <div class="carte nx-canvas" id="nxCanvas"></div>
+      <div class="nx-side">
+        <div class="carte nx-panel" id="nxDetail"><div class="nx-empty">Sélectionne une note, une transaction ou une anomalie.</div></div>
+        <div class="carte nx-panel"><h4>Anomalies</h4><div id="nxAnom"><div class="nx-empty">—</div></div></div>
+        <div class="carte nx-legend">
+          <span><i></i> note reçue (taille ∝ log valeur)</span>
+          <span><i class="ext"></i> note envoyée à un tiers</span>
+          <span><i class="sh"></i> shield</span>
+          <span><i class="tx"></i> tx Railgun</span>
+          <span><i class="un"></i> unshield → 0x</span>
+          <span><i class="gh"></i> entrées/sorties non déchiffrées</span>
+          <span><i class="pv"></i> POI valide</span>
+          <span><i class="pp"></i> preuve soumise</span>
+          <span><i class="pm"></i> POI manquante</span>
+          <span><i class="pb"></i> bloquée</span>
+          <span><i class="tn"></i> aval d’une note bloquée</span>
+          <span>S shield · c change · f frais · → envoi · ← reçu</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="poi" class="view">
+    <div class="carte nx-panel poi-panel">
+      <h4>Transactions émises sans preuve d’innocence soumise</h4>
+      <div id="poiList"><div class="nx-empty">—</div></div>
+    </div>
+    <div class="carte nx-panel poi-panel">
+      <h4>Preuves en attente de soumission (file locale)</h4>
+      <div id="poiPending"><div class="nx-empty">—</div></div>
+    </div>
+  </div>
+
+  <div class="carte vw-log"><div class="vw-loghead"><span>Journal</span><button class="ghost" id="resetLog" type="button">Vider</button></div><pre id="log"></pre></div>
+</div>
+
+<script>
+/* railgun-viewer front — glue */
+(()=>{
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const short=(h,n)=>{if(!h)return"—";n=n||6;const s=String(h);return s.length<=2+n+4?s:s.slice(0,2+n)+"…"+s.slice(-4)};
+const POI_FR={Valid:"Valide",ProofSubmitted:"Preuve soumise",Missing:"Manquante",ShieldBlocked:"Bloquée",Unknown:"Inconnue"};
+const KIND_FR={shield:"Shield",transact:"Transfert",unshield:"Unshield",receive:"Réception"};
+function fmtVal(v,dec,maxFrac){try{v=BigInt(v||0)}catch(_){return String(v)}dec=dec==null?18:Number(dec);maxFrac=maxFrac==null?6:maxFrac;const base=10n**BigInt(dec);const ip=v/base,fp=v%base;let fs=fp.toString().padStart(dec,"0");let cut=fs.slice(0,maxFrac);if(/^0*$/.test(cut)&&fp>0n){const i=fs.search(/[1-9]/);cut=fs.slice(0,Math.min(dec,i+3))}cut=cut.replace(/0+$/,"");return ip.toString()+(cut?","+cut:"")}
+const fmtTs=ts=>ts?new Date(Number(ts)*1000).toLocaleString("fr-FR"):"—";
+const S={status:null,snap:null,updatedAt:0,view:"hist",sel:null,explorer:""};
+const log=m=>{const l=$("log");l.textContent+=m+"\n";l.scrollTop=l.scrollHeight};
+
+// ---- window.noxaku shim for the lineage renderer ----
+window.noxaku={version:"viewer",ready:()=>!!(S.status&&S.status.unlocked&&S.snap),state:()=>({}),
+  notes:async()=>{if(!S.snap)throw new Error("Aucun snapshot : charge un wallet.");return S.snap.graph},
+  tokenInfo:addr=>{const a=(addr||"").toLowerCase();const n=(S.snap&&S.snap.notes||[]).find(x=>(x.token||"").toLowerCase()===a);return n?{symbol:n.symbol,decimals:n.decimals}:{symbol:a.slice(0,6)+"…"+a.slice(-4),decimals:18}},
+  tokenSymbol:addr=>window.noxaku.tokenInfo(addr).symbol,log};
+
+function show(view){S.view=view;document.querySelectorAll("#onglets button").forEach(b=>b.classList.toggle("on",b.dataset.view===view));["hist","notes","poi"].forEach(v=>$(v).classList.toggle("show",v===view));if(view==="notes"&&window.NoxakuNotes&&window.noxaku.ready())window.NoxakuNotes.open()}
+
+async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}:{method:path.startsWith("/api/lock")||path.startsWith("/api/sync")||path.startsWith("/api/refresh")?"POST":"GET"});return r.json()}
+
+function creds(){const mode=$("vwMode").value;const c={chainId:parseInt($("vwNet").value,10),rpcUrl:$("vwRpc").value.trim()||null,poi:$("vwPoi").checked,syncNow:true};if(mode==="mnemonic"){c.mnemonic=$("vwMnemonic").value;c.derivation=$("vwDeriv").value;c.index=parseInt($("vwIndex").value||"0",10)}else if(mode==="viewing"){c.viewingKey=$("vwViewing").value.trim();c.address=$("vwAddress").value.trim()}else{c.shareableKey=$("vwShareable").value.trim()}return c}
+
+async function load(){const b=$("vwLoad");b.disabled=true;try{const r=await api("/api/unlock",creds());if(!r.ok){log("✗ "+r.error);b.disabled=false;return}$("vwMnemonic").value="";$("vwViewing").value="";$("vwShareable").value="";log("chargement OK, synchronisation en cours…")}catch(x){log("✗ "+x.message);b.disabled=false}}
+
+async function poll(){try{const st=await api("/api/status");const changed=!S.status||st.updatedAt!==S.updatedAt;S.status=st;$("vwVer").textContent="railgun-viewer "+st.version;$("zk").textContent=st.address||"—";$("vwModeOut").textContent=st.mode||"—";$("scan").textContent=st.syncing?"sync…":(st.syncedBlock||"—");$("status").textContent=st.lastError?"✗ "+st.lastError:(st.unlocked?"prêt":"verrouillé");$("sync").disabled=!st.unlocked||st.syncing;$("vwLock").disabled=!st.unlocked;$("vwLoad").disabled=st.unlocked;
+  if(changed){S.updatedAt=st.updatedAt;const l=$("log");l.textContent=(st.log||[]).join("\n");l.scrollTop=l.scrollHeight;if(st.unlocked){const snap=await api("/api/snapshot");if(snap&&snap.transactions){S.snap=snap;S.explorer=snap.graph&&snap.graph.explorer||"";render();if(S.view==="notes"&&window.NoxakuNotes)window.NoxakuNotes.refresh()}}else{S.snap=null;render()}}}catch(x){/* serveur absent */}}
+
+const link=(h)=>h?(S.explorer?`<a href="${esc(S.explorer+h)}" target="_blank" rel="noreferrer"><code>${esc(short(h,6))}</code></a>`:`<code>${esc(short(h,6))}</code>`):"—";
+const poiChips=p=>Object.entries(p||{}).map(([k,v])=>`<span class="poi-chip ${esc(v)}" title="${esc(k)}">${esc(short(k,4))} · ${esc(POI_FR[v]||v)}</span>`).join(" ")||'<span class="poi-chip none">—</span>';
+function totalsHtml(t){return (t.totals||[]).map(x=>{const parts=[];if(x.valueIn!=="0")parts.push("entrée "+fmtVal(x.valueIn,x.decimals,5));if(x.valueOut!=="0")parts.push("notes "+fmtVal(x.valueOut,x.decimals,5));if(x.unshield!=="0")parts.push("sortie "+fmtVal(x.unshield,x.decimals,5));return esc(x.symbol)+" : "+parts.join(" / ")}).join("<br>")||"—"}
+
+function render(){const snap=S.snap;const tb=$("hTable").querySelector("tbody");tb.innerHTML="";$("hEmpty").style.display=snap?"none":"";$("hStats").innerHTML="";$("poiList").innerHTML='<div class="nx-empty">—</div>';$("poiPending").innerHTML='<div class="nx-empty">—</div>';$("poiBadge").textContent="0";if(!snap)return;
+  const txs=snap.transactions||[];const notes=snap.notes||[];
+  const mine=notes.filter(n=>n.mine),unspent=mine.filter(n=>!n.spent);
+  const bal=new Map();for(const n of unspent){const b=bal.get(n.symbol)||{v:0n,dec:n.decimals};b.v+=BigInt(n.value);bal.set(n.symbol,b)}
+  $("hStats").innerHTML=[["transactions",txs.length],["émises",txs.filter(t=>t.emitted).length],["notes reçues",mine.length],["non dépensées",unspent.length],["envoyées",notes.filter(n=>!n.mine).length],["sans POI",snap.missingPoi.length]].map(([k,v])=>`<div class="st"><b>${v}</b><span>${k}</span></div>`).join("")+[...bal].map(([s,b])=>`<div class="st tok"><b>${esc(fmtVal(b.v,b.dec,5))}</b><span>${esc(s)} en notes</span></div>`).join("");
+  for(const t of txs){const tr=document.createElement("tr");tr.dataset.id=t.id;tr.className=(t.emitted?"em":"")+(S.sel===t.id?" sel":"");tr.innerHTML=`<td>${esc(fmtTs(t.timestamp))}<div class="dim">#${t.blockNumber||"?"}</div></td><td><span class="kind ${t.kind}">${esc(KIND_FR[t.kind]||t.kind)}</span>${t.emitted?"":'<div class="dim">reçue</div>'}</td><td>${totalsHtml(t)}</td><td>${poiChips(t.pois)}${t.poiPending?' <span class="poi-chip ProofSubmitted">file locale</span>':""}</td><td>${link(t.transactionHash)}</td><td>${t.memos&&t.memos.length?'<span class="memo" title="'+esc(t.memos.join(" | "))+'">✎ '+esc(t.memos[0].slice(0,24))+(t.memos[0].length>24?"…":"")+'</span>':""}</td>`;tr.onclick=()=>select(t.id);tb.appendChild(tr)}
+  // POI tab
+  const mp=snap.missingPoi||[];$("poiBadge").textContent=mp.length;
+  if(mp.length)$("poiList").innerHTML=mp.map(m=>`<div class="an high" data-tx="${esc(m.txId)}"><span class="an-chip high">sans POI</span><span class="an-msg"><b>${esc(fmtTs(m.timestamp))}</b> · bloc ${m.blockNumber||"?"} · ${link(m.transactionHash)}<br>${esc(m.reason)}<br><span class="dim">listes : ${esc((m.lists||[]).map(l=>short(l,4)).join(", ")||"toutes")} · rg ${esc(short(m.railgunTxid||"",6))}</span></span></div>`).join("");
+  $("poiList").querySelectorAll(".an").forEach(d=>d.onclick=()=>{show("hist");select(d.dataset.tx)});
+  const pp=snap.pendingPoi||[];if(pp.length)$("poiPending").innerHTML=pp.map(p=>`<div class="an warn"><span class="an-chip warn">en attente</span><span class="an-msg">rg ${esc(short(p.txid||"",8))} · ${p.inputs} entrée(s), ${p.outputs} sortie(s)${p.hasUnshield?", unshield":""} · listes ${esc((p.listKeys||[]).map(l=>short(l,4)).join(", "))}</span></div>`).join("");
+  if(S.sel)renderDetail(S.sel)}
+
+function select(id){S.sel=id;document.querySelectorAll("#hTable tr").forEach(tr=>tr.classList.toggle("sel",tr.dataset.id===id));renderDetail(id)}
+const row=(k,v)=>`<div class="nx-row"><div class="nx-k">${esc(k)}</div><div class="nx-v">${v}</div></div>`;
+function noteLine(h){const n=(S.snap.notes||[]).find(x=>x.hash===h);if(!n)return`<code>${esc(short(h,6))}</code>`;return`<b>${esc(fmtVal(n.value,n.decimals,6))} ${esc(n.symbol)}</b> <span class="dim">${esc(n.origin)}${n.spent?" · dépensée":""}</span> <code>${esc(short(n.hash,4))}</code>${n.memo?`<div class="memo">✎ ${esc(n.memo)}</div>`:""}<div class="dim">${poiChips(n.pois)}</div>`}
+function renderDetail(id){const el=$("hDetail");const t=(S.snap&&S.snap.transactions||[]).find(x=>x.id===id);if(!t){el.innerHTML='<div class="nx-empty">Clique une transaction.</div>';return}
+  let h=`<h3>${esc(KIND_FR[t.kind]||t.kind)} <code>${esc(short(t.railgunTxid||t.transactionHash||t.id,6))}</code></h3>`;
+  if(t.memos&&t.memos.length)h+=`<div class="memo-box">${t.memos.map(m=>"✎ "+esc(m)).join("<br>")}</div>`;
+  h+=row("Bloc / date",`${t.blockNumber||"?"} · ${esc(fmtTs(t.timestamp))}`);h+=row("Tx chaîne",link(t.transactionHash));if(t.railgunTxid)h+=row("Railgun txid",`<code>${esc(t.railgunTxid)}</code>`);
+  h+=row("Sens",t.emitted?"émise par ce wallet":"reçue");h+=row("Bilan",totalsHtml(t));
+  h+=row("POI (meilleur statut par liste)",poiChips(t.pois)+(t.poiPending?' <span class="poi-chip ProofSubmitted">preuve en file locale</span>':""));
+  if(t.emitted&&!t.poiSubmitted)h+=row("Alerte",'<span class="nx-warn">aucune preuve d’innocence soumise pour cette transaction</span>');
+  h+=row("Entrées ("+t.inputs.length+(t.unknownInputs?" + "+t.unknownInputs+" tierces":"")+")",t.inputs.map(noteLine).join("<hr class='sep'>")||"—");
+  h+=row("Sorties ("+t.outputs.length+(t.unknownOutputs?" + "+t.unknownOutputs+" non déchiffrées":"")+")",t.outputs.map(noteLine).join("<hr class='sep'>")||"—");
+  if(t.unshields&&t.unshields.length)h+=row("Unshield",t.unshields.map(u=>`<b>${esc(fmtVal(u.amount,u.decimals,6))} ${esc(u.symbol)}</b> → <code>${esc(u.to)}</code> <span class="dim">frais ${esc(fmtVal(u.fee,u.decimals,6))}</span>`).join("<br>"));
+  el.innerHTML=h;
+  if(window.NoxakuNotes&&S.snap.graph){const gid=t.railgunTxid||null;if(gid)el.insertAdjacentHTML("beforeend",`<div class="nx-row"><div class="nx-k">Arbre</div><div class="nx-v"><a href="#" id="hGo">voir dans la lignée</a></div></div>`);const a=$("hGo");if(a)a.onclick=e=>{e.preventDefault();show("notes");setTimeout(()=>window.NoxakuNotes.select(gid),300)}}}
+
+function bind(){document.querySelectorAll("#onglets button").forEach(b=>b.onclick=()=>show(b.dataset.view));
+  $("vwMode").onchange=()=>{const m=$("vwMode").value;document.querySelectorAll(".vw-key").forEach(d=>d.hidden=d.dataset.mode!==m);$("vwDerivWrap").style.display=m==="mnemonic"?"":"none"};
+  $("vwLoad").onclick=load;
+  $("vwShow").onclick=()=>document.querySelectorAll(".vw-key input[type=password],.vw-key input[type=text]").forEach(i=>{if(i.id!=="vwAddress")i.type=i.type==="password"?"text":"password"});
+  $("sync").onclick=()=>api("/api/sync");
+  $("vwLock").onclick=async()=>{await api("/api/lock");S.snap=null;S.sel=null;render();log("verrouillé")};
+  $("resetLog").onclick=()=>{$("log").textContent=""};
+  document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target&&e.target.closest&&e.target.closest("#vwForm"))load()});
+  poll();setInterval(poll,2000)}
+document.readyState==="loading"?document.addEventListener("DOMContentLoaded",bind):bind();
+})();
+</script>
+
+<script>
+/* ==================================================================
+   NOXAKU — Arbre des notes (v1.9.0)
+   Onglet séparé : lignée complète des notes du wallet (DAG notes/tx).
+   Source unique : window.noxaku.notes() (snapshot local de l'engine).
+   Zéro dépendance, zéro appel réseau, zéro lecture du DOM du labo.
+   API : window.NoxakuNotes = { open, refresh, select, _pure }
+   ================================================================== */
+(() => {
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+const $=s=>document.getElementById(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const norm=h=>{if(h==null||h===!1||h==="")return null;const s=String(h).replace(/^0x/i,"").toLowerCase();return /^[0-9a-f]+$/.test(s)?"0x"+s.padStart(64,"0"):String(h)};
+const short=(h,n)=>{if(!h)return"\u2014";n=n||6;const s=String(h);return s.length<=2+n+4?s:s.slice(0,2+n)+"\u2026"+s.slice(-4)};
+const POI_RANK={Valid:0,ProofSubmitted:1,Missing:2,ShieldBlocked:3};
+const POI_COL={Valid:"#0F6E56",ProofSubmitted:"#B8860B",Missing:"#E1000F",ShieldBlocked:"#16161D",none:"#b9b9cf"};
+const POI_FR={Valid:"Valide",ProofSubmitted:"Preuve soumise",Missing:"Manquante",ShieldBlocked:"Bloqu\u00e9e",none:"Inconnue"};
+const BUCKET_FR={Spendable:"D\u00e9pensable",ShieldPending:"Shield en attente",ShieldBlocked:"Shield bloqu\u00e9",ProofSubmitted:"Preuve soumise",MissingInternalPOI:"POI interne manquante",MissingExternalPOI:"POI externe manquante",Spent:"D\u00e9pens\u00e9e",Unknown:"Inconnu"};
+const ORIGIN_FR={shield:"Shield (entr\u00e9e depuis le public)",change:"Change",self:"Auto-transfert",transfer_in:"Re\u00e7ue d\u2019un tiers",transfer_out:"Envoy\u00e9e \u00e0 un tiers",fee:"Frais broadcaster",unknown:"Inconnue"};
+const TOKEN_COL=["#000091","#6A6AF4","#B8860B","#0F6E56","#8B2252","#2F6F8F","#7A5C00","#4B4B7A"];
+const RECENT_BLOCKS=300; // ~1 h sur Sepolia (12 s/bloc)
+
+/* ---------- format ---------- */
+function fmtVal(v,dec,maxFrac){try{v=BigInt(v||0)}catch(_){return String(v)}dec=dec==null?18:Number(dec);maxFrac=maxFrac==null?6:maxFrac;const neg=v<0n;if(neg)v=-v;const base=10n**BigInt(dec);const ip=v/base,fp=v%base;let fs=fp.toString().padStart(dec,"0");let cut=fs.slice(0,maxFrac);if(/^0*$/.test(cut)&&fp>0n){const i=fs.search(/[1-9]/);cut=fs.slice(0,Math.min(dec,i+3))}cut=cut.replace(/0+$/,"");return(neg?"-":"")+ip.toString()+(cut?","+cut:"")}
+const fmtTs=ts=>{if(!ts)return"\u2014";const d=new Date(Number(ts)*(Number(ts)>1e12?1:1000));return isNaN(d)?"\u2014":d.toLocaleString("fr-FR")};
+const worstPoi=p=>{if(!p)return"none";let w="none",r=-1;for(const v of Object.values(p)){const k=POI_RANK[v];if(k!=null&&k>r){r=k;w=v}}return w};
+const bestPoi=p=>{if(!p)return"none";let w="none",r=99;for(const v of Object.values(p)){const k=POI_RANK[v];if(k!=null&&k<r){r=k;w=v}}return w};
+
+/* ---------- modèle ---------- */
+function bucketOf(n,lists){if(n.spent)return"Spent";const p=n.pois;const shield=n.origin==="shield";const change=n.origin==="change";if(!lists.length)return p?(Object.values(p).every(v=>v==="Valid")?"Spendable":"Unknown"):"Unknown";if(!p||lists.some(k=>p[k]==null))return shield?"ShieldPending":change?"MissingInternalPOI":"MissingExternalPOI";if(lists.every(k=>p[k]==="Valid"))return"Spendable";if(lists.some(k=>p[k]==="ShieldBlocked"))return"ShieldBlocked";if(shield)return"ShieldPending";if(lists.some(k=>p[k]==="ProofSubmitted"))return"ProofSubmitted";return change?"MissingInternalPOI":"MissingExternalPOI"}
+
+function buildGraph(snap,opts){
+  opts=opts||{};
+  const nodes=new Map(),edges=[];
+  const lists=(snap.listKeys||[]).slice();
+  const addNode=n=>{n.in=n.in||[];n.out=n.out||[];nodes.set(n.id,n);return n};
+  const link=(a,b,v)=>{const A=nodes.get(a),B=nodes.get(b);if(!A||!B)return;if(A.out.includes(b))return;A.out.push(b);B.in.push(a);edges.push({from:a,to:b,value:v==null?null:v})};
+  const bigi=v=>{try{return BigInt(v||0)}catch(_){return 0n}};
+  const isShieldType=t=>t==="ShieldCommitment"||t==="LegacyGeneratedCommitment";
+  const tokens=new Map();const tokKey=(addr,sym)=>{const k=(addr||sym||"?").toLowerCase();if(!tokens.has(k))tokens.set(k,{key:k,addr:addr,sym:sym||"?",color:TOKEN_COL[tokens.size%TOKEN_COL.length]});return tokens.get(k)};
+  // notes
+  const noteOf=(c)=>{const id=norm(c.commitment);let n=nodes.get(id);if(!n){n=addNode({id,type:"note",hash:id,mine:!1,sentByMe:!1,value:bigi(c.value),sym:c.symbol||"?",dec:c.decimals==null?18:c.decimals,token:c.tokenAddress||null,npk:c.npk,random:c.random,memo:c.memoText||null,block:c.blockNumber||null,ts:c.timestamp||null,tree:c.tree,position:c.position,gpos:c.globalPosition,ctype:c.commitmentType||null,createdTx:norm(c.txid),createdRid:null,spent:!1,spendtxid:null,spentBy:null,nullifier:null,pois:null,sentPois:null,blinded:c.blindedCommitment||null,outputType:c.outputType,shieldFee:c.shieldFee||null,sender:null,recipient:null,origin:"unknown",taint:!1});n.tk=tokKey(n.token,n.sym)}return n};
+  for(const r of snap.received||[]){const n=noteOf(r);n.mine=!0;n.pois=r.poisPerList||n.pois;n.nullifier=norm(r.nullifier);n.spendtxid=norm(r.spendtxid);n.spent=!!n.spendtxid;n.createdRid=norm(r.transactCreationRailgunTxid)||n.createdRid;n.sender=r.senderAddress||n.sender;n.ctype=r.commitmentType||n.ctype;if(r.blockNumber)n.block=r.blockNumber;if(r.timestamp)n.ts=r.timestamp;n.blinded=r.blindedCommitment||n.blinded;if(n.outputType==null)n.outputType=r.outputType;if(r.tree!=null){n.tree=r.tree;n.position=r.position;n.gpos=r.globalPosition}}
+  for(const s of snap.sent||[]){const n=noteOf(s);n.sentByMe=!0;n.sentPois=s.poisPerList||null;if(!n.pois)n.pois=s.poisPerList||null;n.createdRid=norm(s.railgunTxid)||n.createdRid;n.recipient=s.recipientAddress||n.recipient;if(s.outputType!=null)n.outputType=s.outputType;n.ctype=n.ctype||s.commitmentType||null;if(!n.block&&s.blockNumber)n.block=s.blockNumber;if(!n.ts&&s.timestamp)n.ts=s.timestamp;n.blinded=n.blinded||s.blindedCommitment||null;if(s.tree!=null&&n.tree==null){n.tree=s.tree;n.position=s.position;n.gpos=s.globalPosition}}
+  for(const n of nodes.values()){if(n.type!=="note")continue;if(isShieldType(n.ctype))n.origin="shield";else if(n.sentByMe){n.origin=n.outputType===2?"change":n.outputType===1?"fee":n.mine?"self":"transfer_out"}else if(n.mine)n.origin=n.outputType===2?"change":"transfer_in";else n.origin="unknown"}
+  // railgun txs
+  const byTxid=new Map();
+  for(const[rid,t]of Object.entries(snap.railgunTxs||{})){const id=norm(rid);const un=t.unshield;const tx=addNode({id,type:"tx",kind:"transact",rid:id,txid:norm(t.txid),block:t.blockNumber||null,ts:t.timestamp||null,nullifiers:(t.nullifiers||[]).map(norm),commitments:(t.commitments||[]).map(norm),bound:t.boundParamsHash||null,vhash:t.verificationHash||null,treeIn:t.utxoTreeIn,treeOut:t.utxoTreeOut,batchStart:t.utxoBatchStartPositionOut,unshieldInfo:un?{to:un.toAddress,value:bigi(un.value),token:un.tokenAddress,sym:null}:null,resolved:!0,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});if(tx.txid){if(!byTxid.has(tx.txid))byTxid.set(tx.txid,[]);byTxid.get(tx.txid).push(tx)}}
+  const chainTx=(txid,block,ts)=>{const id="chain:"+txid;let t=nodes.get(id);if(!t)t=addNode({id,type:"tx",kind:"chain",rid:null,txid,block:block||null,ts:ts||null,nullifiers:[],commitments:[],resolved:!1,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});else{if(!t.block&&block)t.block=block;if(!t.ts&&ts)t.ts=ts}return t};
+  const shieldTx=(txid,block,ts)=>{const id="shield:"+txid;let t=nodes.get(id);if(!t)t=addNode({id,type:"tx",kind:"shield",rid:null,txid,block:block||null,ts:ts||null,nullifiers:[],commitments:[],resolved:!0,fee:!1,unknownIn:0,unknownOut:0,pois:null,inputs:[],outputs:[]});return t};
+  // création → parent
+  for(const n of nodes.values()){if(n.type!=="note")continue;let p=null;if(n.origin==="shield")p=shieldTx(n.createdTx||("unknown:"+n.id),n.block,n.ts);else if(n.createdRid&&nodes.has(n.createdRid))p=nodes.get(n.createdRid);else if(n.createdTx)p=chainTx(n.createdTx,n.block,n.ts);else p=chainTx("unknown:"+n.id,n.block,n.ts);n.parent=p.id;p.outputs.push(n.id);link(p.id,n.id,n.value);if(n.origin==="fee")p.fee=!0;if(n.sentByMe){p.poiOutputs=p.poiOutputs||[];p.poiOutputs.push({id:n.id,pois:n.sentPois||null});if(n.sentPois){p.pois=p.pois||{};for(const[k,v]of Object.entries(n.sentPois)){const r=POI_RANK[v];if(p.pois[k]==null||(POI_RANK[p.pois[k]]??-1)<r)p.pois[k]=v}}}if(!p.block&&n.block)p.block=n.block;if(!p.ts&&n.ts)p.ts=n.ts}
+  // dépenses
+  const anomalies=[];
+  for(const n of nodes.values()){if(n.type!=="note"||!n.mine||!n.spent)continue;const cands=byTxid.get(n.spendtxid)||[];let t=cands.find(c=>n.nullifier&&c.nullifiers.includes(n.nullifier));if(!t&&cands.length===1){t=cands[0];anomalies.push({code:"nullifier-unmatched",sev:"warn",msg:"Nullifier de la note absent de la tx Railgun qui porte son spendtxid",nodes:[n.id,t.id]})}if(!t){t=chainTx(n.spendtxid,null,null);n.spendUnresolved=!0;anomalies.push({code:"spend-unresolved",sev:"warn",msg:"D\u00e9pense non r\u00e9solue dans le txid-tree (arbre TXID incomplet ?)",nodes:[n.id,t.id]})}n.spentBy=t.id;t.inputs.push(n.id);link(n.id,t.id,n.value)}
+  // unshield events
+  const unByRid=new Set();
+  for(const u of snap.unshields||[]){const rid=norm(u.railgunTxid);let t=rid&&nodes.get(rid);if(!t)t=chainTx(norm(u.txid),u.blockNumber,u.timestamp);const id="unshield:"+norm(u.txid)+":"+(u.eventLogIndex==null?"x":u.eventLogIndex);if(nodes.has(id))continue;const tk=tokKey(u.tokenAddress,u.symbol);const un=addNode({id,type:"unshield",txid:norm(u.txid),rid,to:u.toAddress,value:bigi(u.amount),fee:bigi(u.fee),sym:u.symbol||"?",dec:u.decimals==null?18:u.decimals,token:u.tokenAddress,tk,block:u.blockNumber||t.block,ts:u.timestamp||t.ts,pois:u.poisPerList||null,taint:!1});t.outputs.push(id);link(t.id,id,un.value);if(rid)unByRid.add(rid);t.poiOutputs=t.poiOutputs||[];t.poiOutputs.push({id,pois:un.pois||null});if(un.pois){t.pois=t.pois||{};for(const[k,v]of Object.entries(un.pois)){const r=POI_RANK[v];if(t.pois[k]==null||(POI_RANK[t.pois[k]]??-1)<r)t.pois[k]=v}}}
+  for(const t of nodes.values()){if(t.type!=="tx"||!t.unshieldInfo||unByRid.has(t.id))continue;const ui=t.unshieldInfo;if(ui.value===0n&&!ui.to)continue;const inf=(window.noxaku&&window.noxaku.tokenInfo)?window.noxaku.tokenInfo(ui.token):{symbol:"?",decimals:18};const tk=tokKey(ui.token,inf.symbol);const id="unshield:"+t.id;const un=addNode({id,type:"unshield",txid:t.txid,rid:t.id,to:ui.to,value:ui.value,fee:null,sym:inf.symbol,dec:inf.decimals,token:ui.token,tk,block:t.block,ts:t.ts,pois:null,taint:!1,fromTree:!0});t.outputs.push(id);link(t.id,id,un.value)}
+  // fant\u00f4mes (entr\u00e9es/sorties non d\u00e9chiffr\u00e9es)
+  for(const t of [...nodes.values()]){if(t.type!=="tx"||!t.resolved||t.kind==="shield")continue;const mineNulls=new Set(t.inputs.map(i=>nodes.get(i)).filter(Boolean).map(n=>n.nullifier));const unIn=t.nullifiers.filter(x=>!mineNulls.has(x));const known=new Set(t.outputs.map(i=>nodes.get(i)).filter(x=>x&&x.type==="note").map(x=>x.hash));const unOut=t.commitments.filter(x=>!known.has(x));t.unknownIn=unIn.length;t.unknownOut=unOut.length;if(unIn.length){const g=addNode({id:"gin:"+t.id,type:"ghost",dir:"in",n:unIn.length,items:unIn,txid:t.txid,block:t.block,ts:t.ts,taint:!1});t.inputs.push(g.id);link(g.id,t.id,null);if(mineNulls.size)anomalies.push({code:"partial-inputs",sev:"warn",msg:"Tx portant mes entr\u00e9es mais "+unIn.length+" nullifier(s) non attribu\u00e9(s) \u00e0 mes notes",nodes:[t.id]})}if(unOut.length){const g=addNode({id:"gout:"+t.id,type:"ghost",dir:"out",n:unOut.length,items:unOut,txid:t.txid,block:t.block,ts:t.ts,taint:!1});t.outputs.push(g.id);link(t.id,g.id,null)}t.kind=t.inputs.some(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine})?"transact":"external"}
+  for(const t of nodes.values()){if(t.type==="tx"&&t.kind==="chain"&&!t.inputs.some(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine}))t.kind="external"}
+  // buckets, valeurs par tx
+  for(const n of nodes.values())if(n.type==="note")n.bucket=bucketOf(n,lists);
+  const sumTok=ids=>{const m=new Map();for(const id of ids){const x=nodes.get(id);if(!x||(x.type!=="note"&&x.type!=="unshield"))continue;const k=x.tk.key;m.set(k,(m.get(k)||0n)+x.value+(x.type==="unshield"&&x.fee?x.fee:0n))}return m};
+  for(const t of nodes.values()){if(t.type!=="tx")continue;t.valIn=sumTok(t.inputs);t.valOut=sumTok(t.outputs)}
+  // anomalies
+  let maxBlock=0;for(const x of nodes.values())if(x.block&&x.block>maxBlock)maxBlock=x.block;
+  const nowS=Date.now()/1000;const isRecent=x=>{if(x.ts&&x.ts>1e9)return nowS-Number(x.ts)<3600;return !!(x.block&&maxBlock-x.block<RECENT_BLOCKS)};
+  for(const t of nodes.values()){if(t.type!=="tx")continue;const mineIn=t.inputs.filter(i=>{const x=nodes.get(i);return x&&x.type==="note"&&x.mine});if(!mineIn.length)continue;const submitted=(t.poiOutputs||[]).some(o=>o.pois&&Object.values(o.pois).some(v=>v==="ProofSubmitted"||v==="Valid"));if(!submitted){const recent=isRecent(t);anomalies.push({code:"spend-no-poi",sev:recent?"warn":"high",msg:(recent?"D\u00e9pense r\u00e9cente sans POI soumise (latence noeud ?)":"D\u00e9pense sans POI soumise sur aucune liste \u2014 sortie hors PPOI"),nodes:[t.id,...mineIn]})}if(t.resolved&&t.unknownIn===0&&t.unknownOut===0){for(const[k,vin]of t.valIn){const vout=t.valOut.get(k)||0n;if(vin!==vout)anomalies.push({code:"imbalance",sev:"high",msg:"Somme entr\u00e9es "+vin+" \u2260 sorties "+vout+" ("+k.slice(0,10)+") sur une tx enti\u00e8rement connue",nodes:[t.id]})}}}
+  for(const n of nodes.values()){if(n.type!=="note")continue;const p=n.parent&&nodes.get(n.parent);if(p&&p.type==="tx"&&p.resolved&&p.kind!=="shield"&&p.commitments.length&&!p.commitments.includes(n.hash))anomalies.push({code:"hash-not-in-tx",sev:"high",msg:"Hash de la note absent des commitments de sa tx de cr\u00e9ation (phantom ?)",nodes:[n.id,p.id]});if(n.pois){const vs=new Set(Object.values(n.pois));if(vs.size>1)anomalies.push({code:"list-disagreement",sev:"warn",msg:"Statut POI diff\u00e9rent selon les listes : "+[...Object.entries(n.pois)].map(([k,v])=>short(k,4)+"="+v).join(", "),nodes:[n.id]});if([...vs].includes("ShieldBlocked"))anomalies.push({code:"blocked",sev:"high",msg:"Note bloqu\u00e9e par une liste PPOI",nodes:[n.id]})}if(n.mine&&!n.spent&&n.origin!=="shield"){const old=!isRecent(n)&&(n.ts||n.block);const missing=!n.pois||Object.values(n.pois).every(v=>v==="Missing");if(old&&missing)anomalies.push({code:"orphan",sev:"warn",msg:"POI jamais soumise pour cette note (orpheline : l\u2019engine cr\u00e9ateur n\u2019a pas persist\u00e9 la preuve)",nodes:[n.id]})}if(n.mine&&!n.spent&&n.origin==="shield"){const old=!isRecent(n)&&(n.ts||n.block);const notValid=!n.pois||!Object.values(n.pois).some(v=>v==="Valid");if(old&&notValid&&!(n.pois&&Object.values(n.pois).includes("ShieldBlocked")))anomalies.push({code:"shield-stuck",sev:"warn",msg:"Shield toujours non valid\u00e9 apr\u00e8s ~1 h (noeud POI en retard ou shield refus\u00e9)",nodes:[n.id]})}if(n.value===0n)n.dummy=!0}
+  const zeros=[...nodes.values()].filter(x=>x.type==="note"&&x.dummy);if(zeros.length)anomalies.push({code:"zero-value",sev:"info",msg:zeros.length+" note(s) de valeur nulle (sorties factices de remplissage)",nodes:zeros.map(z=>z.id)});
+  // taint : aval des notes bloqu\u00e9es
+  const seeds=[...nodes.values()].filter(x=>x.type==="note"&&x.pois&&Object.values(x.pois).includes("ShieldBlocked")).map(x=>x.id);if(seeds.length){const q=[...seeds],seen=new Set(q);while(q.length){const id=q.shift();const x=nodes.get(id);x.taint=!0;for(const o of x.out)if(!seen.has(o)){seen.add(o);q.push(o)}}const tainted=[...seen].filter(id=>!seeds.includes(id)&&nodes.get(id).type==="note");if(tainted.length)anomalies.push({code:"taint",sev:"info",msg:tainted.length+" note(s) en aval d\u2019une note bloqu\u00e9e",nodes:tainted})}
+  return{nodes,edges,anomalies,lists,tokens,maxBlock};
+}
+
+/* ---------- filtre → sous-graphe ---------- */
+function subgraph(g,f){
+  f=f||{};const keepNote=n=>{if(f.token&&n.tk.key!==f.token)return!1;if(!f.spent&&n.spent)return!1;if(!f.external&&!n.mine)return!1;if(f.poi&&f.poi!=="any"){const w=n.pois?Object.values(n.pois):[];if(f.poi==="none")return!w.length;if(!w.includes(f.poi))return!1}return!0};
+  const keep=new Set();for(const n of g.nodes.values())if(n.type==="note"&&keepNote(n))keep.add(n.id);
+  for(const n of [...keep]){const x=g.nodes.get(n);for(const id of [...x.in,...x.out]){const y=g.nodes.get(id);if(y&&y.type==="tx")keep.add(id)}}
+  for(const id of [...keep]){const x=g.nodes.get(id);if(x.type!=="tx")continue;for(const o of [...x.out,...x.in]){const y=g.nodes.get(o);if(!y)continue;if(y.type==="unshield"&&(!f.token||y.tk.key===f.token))keep.add(o);if(y.type==="ghost"&&f.external)keep.add(o)}}
+  const nodes=new Map();for(const id of keep){const x=g.nodes.get(id);nodes.set(id,Object.assign({},x,{in:x.in.filter(i=>keep.has(i)),out:x.out.filter(o=>keep.has(o))}))}
+  const edges=g.edges.filter(e=>keep.has(e.from)&&keep.has(e.to));
+  return{nodes,edges,anomalies:g.anomalies,lists:g.lists,tokens:g.tokens,maxBlock:g.maxBlock};
+}
+
+/* ---------- repli des cha\u00eenes de change ---------- */
+function collapseChains(g){
+  const nodes=new Map();for(const[k,v]of g.nodes)nodes.set(k,Object.assign({},v,{in:v.in.slice(),out:v.out.slice()}));
+  const isHop=t=>{if(!t||t.type!=="tx"||t.kind==="shield")return!1;const ins=t.in.map(i=>nodes.get(i)).filter(Boolean);const mineIn=ins.filter(x=>x.type==="note"&&x.mine);if(mineIn.length!==1||ins.length!==1)return!1;const outs=t.out.map(o=>nodes.get(o)).filter(Boolean);if(outs.some(o=>o.type==="unshield"))return!1;const mineOut=outs.filter(o=>o.type==="note"&&o.mine&&o.origin!=="fee");return mineOut.length===1};
+  const nextOf=t=>{const outs=t.out.map(o=>nodes.get(o));return outs.find(o=>o&&o.type==="note"&&o.mine&&o.origin!=="fee")};
+  const removed=new Set(),runs=[];const visited=new Set();
+  for(const t of [...nodes.values()]){if(!isHop(t)||visited.has(t.id))continue;const inNote=nodes.get(t.in[0]);const pTx=inNote&&inNote.in[0]&&nodes.get(inNote.in[0]);if(pTx&&isHop(pTx)&&nextOf(pTx)&&nextOf(pTx).id===inNote.id)continue; // pas un d\u00e9but de run
+    const run=[];let cur=t;while(cur&&isHop(cur)&&!visited.has(cur.id)){visited.add(cur.id);run.push(cur);const nx=nextOf(cur);if(!nx)break;const consumer=nx.out.map(o=>nodes.get(o)).find(o=>o&&o.type==="tx");if(!consumer||!isHop(consumer)||consumer.in.length!==1)break;cur=consumer}
+    if(run.length>=2)runs.push(run)}
+  const edges=g.edges.filter(e=>!(nodes.has(e.from)&&nodes.has(e.to))||!1).slice();let E=g.edges.slice();
+  for(const run of runs){const first=run[0],last=run[run.length-1];const inNote=nodes.get(first.in[0]);const outNote=nextOf(last);let sideOut=0,sideVal=0n;for(const t of run){for(const o of t.out){const x=nodes.get(o);if(!x)continue;if(x===nextOf(t))continue;sideOut++;if(x.type==="note")sideVal+=x.value}}
+    const id="chain:"+first.id+":"+last.id;const sup={id,type:"chain",n:run.length,side:sideOut,sideVal,hops:run.map(r=>r.id),block:first.block,ts:first.ts,blockEnd:last.block,in:[inNote.id],out:[outNote.id],taint:run.some(r=>r.taint)};
+    for(let i=0;i<run.length;i++){removed.add(run[i].id);for(const o of run[i].out){const x=nodes.get(o);if(x&&x.id!==outNote.id)removed.add(o)}}
+    nodes.set(id,sup);inNote.out=inNote.out.filter(o=>o!==first.id).concat([id]);outNote.in=outNote.in.filter(i=>i!==last.id).concat([id]);
+    E=E.filter(e=>!removed.has(e.from)&&!removed.has(e.to));E.push({from:inNote.id,to:id,value:inNote.value},{from:id,to:outNote.id,value:outNote.value})}
+  for(const r of removed)nodes.delete(r);
+  return{nodes,edges:E,anomalies:g.anomalies,lists:g.lists,tokens:g.tokens,maxBlock:g.maxBlock};
+}
+
+/* ---------- composantes ---------- */
+function components(g){const parent=new Map();const find=x=>{while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x)}return x};for(const id of g.nodes.keys())parent.set(id,id);for(const e of g.edges){const a=find(e.from),b=find(e.to);if(a!==b)parent.set(a,b)}const comps=new Map();for(const id of g.nodes.keys()){const r=find(id);if(!comps.has(r))comps.set(r,[]);comps.get(r).push(id)}const out=[...comps.values()].map(ids=>{const ns=ids.map(i=>g.nodes.get(i));const blocks=ns.map(n=>n.block||0).filter(Boolean);return{ids,minBlock:blocks.length?Math.min(...blocks):0,maxBlock:blocks.length?Math.max(...blocks):0,nodes:ns}});out.sort((a,b)=>a.minBlock-b.minBlock||a.ids.length-b.ids.length);return out}
+
+/* ---------- layouts ---------- */
+const GAP={col:150,row:56,band:70,pad:40};
+function layerAssign(g,ids){const set=new Set(ids);const layer=new Map();const indeg=new Map();for(const id of ids)indeg.set(id,g.nodes.get(id).in.filter(i=>set.has(i)).length);const q=[...ids].filter(id=>indeg.get(id)===0);for(const id of q)layer.set(id,0);let head=0;while(head<q.length){const id=q[head++];const L=layer.get(id);for(const o of g.nodes.get(id).out){if(!set.has(o))continue;layer.set(o,Math.max(layer.get(o)||0,L+1));indeg.set(o,indeg.get(o)-1);if(indeg.get(o)===0)q.push(o)}}for(const id of ids)if(!layer.has(id))layer.set(id,0);return layer}
+function layoutLayered(g,comp){const ids=comp.ids;const layer=layerAssign(g,ids);const byL=new Map();for(const id of ids){const L=layer.get(id);if(!byL.has(L))byL.set(L,[]);byL.get(L).push(id)}const Ls=[...byL.keys()].sort((a,b)=>a-b);const pos=new Map();const key=id=>{const n=g.nodes.get(id);return(n.block||0)*1e6+(n.gpos||0)};for(const L of Ls){const arr=byL.get(L);arr.sort((a,b)=>key(a)-key(b));arr.forEach((id,i)=>pos.set(id,i))}const set=new Set(ids);const sweep=(down)=>{const order=down?Ls:Ls.slice().reverse();for(const L of order){const arr=byL.get(L);const bary=id=>{const n=g.nodes.get(id);const nb=(down?n.in:n.out).filter(x=>set.has(x));if(!nb.length)return pos.get(id);return nb.reduce((s,x)=>s+pos.get(x),0)/nb.length};arr.sort((a,b)=>bary(a)-bary(b)||key(a)-key(b));arr.forEach((id,i)=>pos.set(id,i))}};sweep(!0);sweep(!1);sweep(!0);let rows=0;const xy=new Map();for(const L of Ls){const arr=byL.get(L);rows=Math.max(rows,arr.length);arr.forEach((id,i)=>xy.set(id,{x:L*GAP.col,y:i*GAP.row}))}return{xy,width:(Ls.length-1)*GAP.col,height:Math.max(0,rows-1)*GAP.row}}
+function layoutTime(g,comp){const ids=comp.ids;const set=new Set(ids);const blocks=[...new Set(ids.map(id=>g.nodes.get(id).block||0))].sort((a,b)=>a-b);const col=new Map(blocks.map((b,i)=>[b,i]));const layer=layerAssign(g,ids);const cx=id=>{const n=g.nodes.get(id);const c=col.get(n.block||0)*2;return n.type==="tx"||n.type==="chain"?c:c+1};const byC=new Map();for(const id of ids){const c=cx(id);if(!byC.has(c))byC.set(c,[]);byC.get(c).push(id)}const pos=new Map();for(const[c,arr]of byC){arr.sort((a,b)=>layer.get(a)-layer.get(b)||(g.nodes.get(a).gpos||0)-(g.nodes.get(b).gpos||0));arr.forEach((id,i)=>pos.set(id,i))}const cs=[...byC.keys()].sort((a,b)=>a-b);for(let it=0;it<2;it++)for(const c of cs){const arr=byC.get(c);const bary=id=>{const n=g.nodes.get(id);const nb=n.in.filter(x=>set.has(x));return nb.length?nb.reduce((s,x)=>s+pos.get(x),0)/nb.length:pos.get(id)};arr.sort((a,b)=>bary(a)-bary(b));arr.forEach((id,i)=>pos.set(id,i))}const xy=new Map();let rows=0,maxC=0;for(const[c,arr]of byC){rows=Math.max(rows,arr.length);maxC=Math.max(maxC,c);arr.forEach((id,i)=>xy.set(id,{x:c*GAP.col*.7,y:i*GAP.row}))}return{xy,width:maxC*GAP.col*.7,height:Math.max(0,rows-1)*GAP.row}}
+function layoutAll(g,mode){const comps=components(g);let y=0,width=0;const xy=new Map();const bands=[];for(const c of comps){const L=mode==="time"?layoutTime(g,c):layoutLayered(g,c);for(const[id,p]of L.xy)xy.set(id,{x:p.x+GAP.pad,y:p.y+y+GAP.band});bands.push({comp:c,y,height:L.height+GAP.band+GAP.pad,width:L.width+GAP.pad*2});width=Math.max(width,L.width+GAP.pad*2);y+=L.height+GAP.band+GAP.pad}return{xy,bands,width:width+GAP.pad,height:y+GAP.pad}}
+
+/* ---------- rendu SVG ---------- */
+function noteRadius(n,maxLog){if(n.value===0n)return 6;const v=Math.log10(Number(n.value)+1);return 8+10*(maxLog>0?v/maxLog:0)}
+function poiArcs(cx,cy,r,pois,lists){const keys=lists.length?lists:(pois?Object.keys(pois):[]);if(!keys.length){return`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${POI_COL.none}" stroke-width="2" stroke-dasharray="2 3"/>`}const n=keys.length;let s="";keys.forEach((k,i)=>{const st=pois&&pois[k]?pois[k]:"none";const a0=-Math.PI/2+i*2*Math.PI/n+.06,a1=-Math.PI/2+(i+1)*2*Math.PI/n-.06;if(n===1){s+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${POI_COL[st]||POI_COL.none}" stroke-width="3"${st==="none"?' stroke-dasharray="2 3"':""}><title>${esc(k)} : ${esc(POI_FR[st]||st)}</title></circle>`;return}const x0=cx+r*Math.cos(a0),y0=cy+r*Math.sin(a0),x1=cx+r*Math.cos(a1),y1=cy+r*Math.sin(a1);s+=`<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${a1-a0>Math.PI?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" fill="none" stroke="${POI_COL[st]||POI_COL.none}" stroke-width="3"${st==="none"?' stroke-dasharray="2 3"':""}><title>${esc(k)} : ${esc(POI_FR[st]||st)}</title></path>`});return s}
+function edgePath(a,b){const dx=Math.max(30,(b.x-a.x)/2);return`M${a.x} ${a.y} C${a.x+dx} ${a.y} ${b.x-dx} ${b.y} ${b.x} ${b.y}`}
+function renderSVG(g,L,opts){
+  opts=opts||{};const lists=g.lists;const notes=[...g.nodes.values()].filter(n=>n.type==="note");let maxLog=0;for(const n of notes)if(n.value>0n)maxLog=Math.max(maxLog,Math.log10(Number(n.value)+1));
+  const maxEdge=Math.max(1,...g.edges.map(e=>e.value?Math.log10(Number(e.value)+1):0));
+  let bands="",edges="",nodes="";
+  L.bands.forEach((b,i)=>{const c=b.comp;const ns=c.nodes;const toks=[...new Set(ns.filter(n=>n.tk).map(n=>n.tk.sym))];const shields=ns.filter(n=>n.type==="note"&&n.origin==="shield");const uns=ns.filter(n=>n.type==="unshield");const txs=ns.filter(n=>n.type==="tx"||n.type==="chain");const worst=ns.filter(n=>n.type==="note"&&n.mine).map(n=>worstPoi(n.pois)).sort((a,b)=>(POI_RANK[b]??-1)-(POI_RANK[a]??-1))[0]||"none";const sumIn=shields.reduce((s,n)=>s+n.value,0n),sumOut=uns.reduce((s,n)=>s+n.value,0n);const dec=shields[0]?shields[0].dec:(uns[0]?uns[0].dec:18);const lab=`Composante ${i+1} \u00b7 ${toks.join("/")||"?"} \u00b7 ${shields.length} shield (${fmtVal(sumIn,dec,5)}) \u00b7 ${uns.length} unshield (${fmtVal(sumOut,dec,5)}) \u00b7 ${txs.length} tx \u00b7 POI la pire : ${POI_FR[worst]||worst}${c.minBlock?" \u00b7 blocs "+c.minBlock+"\u2013"+c.maxBlock:""}`;bands+=`<g class="band"><rect x="6" y="${b.y+8}" width="${Math.max(L.width,b.width)-12}" height="${b.height-12}" rx="14" fill="${i%2?"rgba(0,0,145,.025)":"rgba(0,0,145,.045)"}"/><text x="18" y="${b.y+30}" class="bandlab">${esc(lab)}</text></g>`});
+  for(const e of g.edges){const a=L.xy.get(e.from),b=L.xy.get(e.to);if(!a||!b)continue;const w=e.value?1+2.5*(Math.log10(Number(e.value)+1)/maxEdge):1;const from=g.nodes.get(e.from),to=g.nodes.get(e.to);const cls="edge"+((from.taint||to.taint)?" taint":"")+(e.value==null?" ghost":"");edges+=`<path class="${cls}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${edgePath(a,b)}" stroke-width="${w.toFixed(2)}" marker-end="url(#nxArrow)"/>`}
+  for(const n of g.nodes.values()){const p=L.xy.get(n.id);if(!p)continue;let body="",lab="",cls="nd "+n.type;if(n.type==="note"){const r=noteRadius(n,maxLog);const col=n.tk.color;const spent=n.spent;cls+=(n.mine?" mine":" ext")+(spent?" spent":" unspent")+(n.dummy?" dummy":"")+(n.taint?" taint":"")+(" o-"+n.origin);const fill=n.mine?col:"#fff";const stroke=n.mine?(spent?"#9a9ab5":"#16161D"):col;body=`<circle class="core" cx="${p.x}" cy="${p.y}" r="${r.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${spent?1.2:1.8}"${n.mine?"":' stroke-dasharray="4 3"'}${n.dummy?' stroke-dasharray="2 2"':""}/>`+poiArcs(p.x,p.y,r+4.5,n.pois,lists)+(n.taint?`<circle cx="${p.x}" cy="${p.y}" r="${(r+9).toFixed(1)}" fill="none" stroke="#E1000F" stroke-width="1.5" stroke-dasharray="3 3"/>`:"");if(n.origin==="shield")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${n.mine?"#fff":col}">S</text>`;else if(n.origin==="fee")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${col}">f</text>`;else if(n.origin==="change")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">c</text>`;else if(n.origin==="transfer_out")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="${col}">\u2192</text>`;else if(n.origin==="transfer_in")body+=`<text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">\u2190</text>`;lab=`${fmtVal(n.value,n.dec,5)} ${n.sym}`;if(opts.labels)body+=`<text x="${p.x}" y="${(p.y+r+16).toFixed(1)}" class="lab">${esc(lab)}</text>`}
+    else if(n.type==="tx"){cls+=" k-"+n.kind+(n.resolved?"":" unresolved")+(n.taint?" taint":"")+(n.fee?" fee":"");if(n.kind==="shield")body=`<rect x="${p.x-9}" y="${p.y-9}" width="18" height="18" rx="4" fill="#E1000F" stroke="#fff" stroke-width="1.5"/><text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#fff">\u2913</text>`;else{const d=13;body=`<polygon points="${p.x},${p.y-d} ${p.x+d},${p.y} ${p.x},${p.y+d} ${p.x-d},${p.y}" fill="${n.kind==="external"?"#f3f3fb":"#fff"}" stroke="${n.kind==="external"?"#9a9ab5":"#000091"}" stroke-width="2"${n.resolved?"":' stroke-dasharray="3 2"'}/>`;if(n.fee)body+=`<circle cx="${p.x+d-2}" cy="${p.y-d+2}" r="4" fill="#B8860B"><title>Frais broadcaster : soumission par un tiers</title></circle>`;const st=worstPoi(n.pois);body+=`<circle cx="${p.x-d+2}" cy="${p.y+d-2}" r="4" fill="${POI_COL[st]||POI_COL.none}"><title>POI de d\u00e9pense : ${esc(POI_FR[st]||st)}</title></circle>`}if(opts.labels){lab=n.kind==="shield"?"shield"+(n.txid?" "+short(n.txid,4):""):(n.rid?"rg "+short(n.rid,4):"tx "+short(n.txid||"",4));body+=`<text x="${p.x}" y="${p.y+26}" class="lab tx">${esc(lab)}${n.block?" \u00b7 #"+n.block:""}</text>`}}
+    else if(n.type==="unshield"){cls+=(n.taint?" taint":"");body=`<rect x="${p.x-16}" y="${p.y-11}" width="32" height="22" rx="7" fill="#fff" stroke="#000091" stroke-width="1.8"/><text x="${p.x}" y="${p.y+4}" class="glyph" fill="#000091">\u2192 0x</text>`+(n.pois?`<circle cx="${p.x+14}" cy="${p.y-10}" r="4" fill="${POI_COL[worstPoi(n.pois)]||POI_COL.none}"/>`:"");if(opts.labels)body+=`<text x="${p.x}" y="${p.y+26}" class="lab">${esc(fmtVal(n.value,n.dec,5)+" "+n.sym)} \u2192 ${esc(short(n.to||"",3))}</text>`}
+    else if(n.type==="ghost"){body=`<circle cx="${p.x}" cy="${p.y}" r="9" fill="#fff" stroke="#9a9ab5" stroke-width="1.5" stroke-dasharray="3 2"/><text x="${p.x}" y="${p.y+3.5}" class="glyph" fill="#6a6a8a">${n.n}</text>`;if(opts.labels)body+=`<text x="${p.x}" y="${p.y+24}" class="lab ghost">${n.dir==="in"?"entr\u00e9e(s) tierce(s)":"sortie(s) non d\u00e9chiffr\u00e9e(s)"}</text>`}
+    else if(n.type==="chain"){cls+=(n.taint?" taint":"");body=`<rect x="${p.x-22}" y="${p.y-11}" width="44" height="22" rx="11" fill="#f3f3fb" stroke="#000091" stroke-width="1.6" stroke-dasharray="4 2"/><text x="${p.x}" y="${p.y+4}" class="glyph" fill="#000091">\u27f3 ${n.n}</text>`;if(opts.labels)body+=`<text x="${p.x}" y="${p.y+26}" class="lab">${n.n} sauts de change${n.side?" \u00b7 "+n.side+" sortie(s) annexe(s)":""}</text>`}
+    nodes+=`<g class="${cls}" data-id="${esc(n.id)}" tabindex="0">${body}</g>`}
+  const W=Math.max(400,L.width),H=Math.max(200,L.height);
+  return{svg:`<defs><marker id="nxArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5 0 10z" fill="#9a9ab5"/></marker></defs><g id="nxView">${bands}<g class="edges">${edges}</g><g class="nodes">${nodes}</g></g>`,width:W,height:H};
+}
+
+/* ---------- \u00e9tat de l'onglet ---------- */
+const S={snap:null,graph:null,view:null,layout:null,sel:null,filters:{token:"",poi:"any",spent:!0,external:!0,collapse:!1,labels:!0,mode:"layered"},tf:{x:0,y:0,k:1},loading:!1,lastLoad:0,opened:!1,err:null};
+
+function setStatus(msg,err){const e=$("nxStatus");if(!e)return;e.textContent=msg||"";e.classList.toggle("err",!!err)}
+function api(){return window.noxaku||null}
+
+async function refresh(force){
+  if(S.loading){S.again=!0;return}const a=api();
+  if(!a){setStatus("Bundle non charg\u00e9 : window.noxaku absent.",!0);return}
+  if(!a.ready()){setStatus("Wallet non d\u00e9riv\u00e9 : cr\u00e9e ou re-d\u00e9rive la passkey (Mode labo, \u00e9tape 1).",!0);$("nxCanvas")&&($("nxCanvas").innerHTML="");return}
+  if(!force&&S.snap&&Date.now()-S.lastLoad<15000){draw();return}
+  S.loading=!0;setStatus("Lecture de l\u2019engine\u2026");const t0=Date.now();
+  try{S.snap=await a.notes({});S.lastLoad=Date.now();S.graph=buildGraph(S.snap,{});fillTokens();draw();setStatus("Snapshot "+new Date(S.lastLoad).toLocaleTimeString("fr-FR")+" \u00b7 "+(Date.now()-t0)+" ms")}
+  catch(x){S.err=x;setStatus("Erreur : "+(x&&x.message||x),!0);console.error(x)}
+  finally{S.loading=!1;if(S.again){S.again=!1;setTimeout(()=>refresh(!0),300)}}
+}
+function fillTokens(){const sel=$("nxTok");if(!sel||!S.graph)return;const cur=sel.value;sel.innerHTML='<option value="">Tous les jetons</option>'+[...S.graph.tokens.values()].map(t=>`<option value="${esc(t.key)}">${esc(t.sym)}</option>`).join("");if([...S.graph.tokens.keys()].includes(cur))sel.value=cur;else S.filters.token=""}
+function currentView(){let v=subgraph(S.graph,S.filters);if(S.filters.collapse)v=collapseChains(v);return v}
+function draw(keepTf){
+  const cv=$("nxCanvas");if(!cv||!S.graph)return;
+  S.view=currentView();S.layout=layoutAll(S.view,S.filters.mode);
+  const r=renderSVG(S.view,S.layout,{labels:S.filters.labels});
+  cv.innerHTML=`<svg id="nxSvg" xmlns="${NS}" width="100%" height="100%" viewBox="0 0 ${r.width} ${r.height}" preserveAspectRatio="xMinYMin meet" style="touch-action:none">${r.svg}</svg>`;
+  S.svgW=r.width;S.svgH=r.height;
+  if(!keepTf)fit();else applyTf();
+  bindSvg();renderStats();renderAnomalies();if(S.sel&&S.view.nodes.has(S.sel))markSel(S.sel);else{S.sel=null;renderDetail(null)}
+}
+function applyTf(){const v=document.getElementById("nxView");if(v)v.setAttribute("transform",`translate(${S.tf.x} ${S.tf.y}) scale(${S.tf.k})`)}
+function fit(){const cv=$("nxCanvas");if(!cv)return;const bw=cv.clientWidth||800,bh=cv.clientHeight||500;const k=Math.min(1.6,Math.max(.15,Math.min(bw/(S.svgW+20),bh/(S.svgH+20))));const svg=document.getElementById("nxSvg");if(svg){svg.setAttribute("viewBox",`0 0 ${bw} ${bh}`)}S.tf={x:10,y:10,k};applyTf()}
+function bindSvg(){
+  const cv=$("nxCanvas"),svg=document.getElementById("nxSvg");if(!svg)return;
+  let drag=null;
+  svg.addEventListener("pointerdown",e=>{if(e.button!==0)return;const g=e.target.closest&&e.target.closest("g.nd");drag={x:e.clientX,y:e.clientY,tx:S.tf.x,ty:S.tf.y,moved:!1,target:g?g.dataset.id:null};try{svg.setPointerCapture(e.pointerId)}catch(_){}});
+  svg.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=!0;S.tf.x=drag.tx+dx;S.tf.y=drag.ty+dy;applyTf()});
+  svg.addEventListener("pointerup",e=>{if(!drag)return;const{moved,target}=drag;drag=null;if(moved)return;select(target||null)});
+  svg.addEventListener("pointercancel",()=>{drag=null});
+  svg.addEventListener("wheel",e=>{e.preventDefault();const rect=svg.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;const f=Math.exp(-e.deltaY*.0015);const k=Math.min(6,Math.max(.08,S.tf.k*f));const q=k/S.tf.k;S.tf.x=mx-(mx-S.tf.x)*q;S.tf.y=my-(my-S.tf.y)*q;S.tf.k=k;applyTf()},{passive:!1});
+  svg.addEventListener("mouseover",e=>{const g=e.target.closest&&e.target.closest("g.nd");if(g)highlight(g.dataset.id)});
+  svg.addEventListener("mouseout",e=>{const g=e.target.closest&&e.target.closest("g.nd");if(g)highlight(null)});
+  svg.addEventListener("keydown",e=>{if(e.key==="Enter"){const g=e.target.closest&&e.target.closest("g.nd");if(g)select(g.dataset.id)}});
+}
+function lineage(id){const v=S.view;const up=new Set(),down=new Set();const walk=(start,dir,acc)=>{const q=[start];while(q.length){const x=q.shift();const n=v.nodes.get(x);if(!n)continue;for(const y of(dir==="up"?n.in:n.out))if(!acc.has(y)){acc.add(y);q.push(y)}}};walk(id,"up",up);walk(id,"down",down);return{up,down}}
+function highlight(id){const svg=document.getElementById("nxSvg");if(!svg)return;if(!id){svg.classList.remove("hl");svg.querySelectorAll(".lit").forEach(x=>x.classList.remove("lit"));return}const{up,down}=lineage(id);const set=new Set([id,...up,...down]);svg.classList.add("hl");svg.querySelectorAll("g.nd").forEach(x=>x.classList.toggle("lit",set.has(x.dataset.id)));svg.querySelectorAll("path.edge").forEach(x=>x.classList.toggle("lit",set.has(x.dataset.from)&&set.has(x.dataset.to)))}
+function markSel(id){const svg=document.getElementById("nxSvg");if(!svg)return;svg.querySelectorAll("g.nd.sel").forEach(x=>x.classList.remove("sel"));if(id){const g=svg.querySelector(`g.nd[data-id="${CSS.escape(id)}"]`);if(g)g.classList.add("sel")}}
+function select(id,center){S.sel=id;markSel(id);renderDetail(id?S.view.nodes.get(id):null);if(id&&center){const p=S.layout.xy.get(id);const cv=$("nxCanvas");if(p&&cv){S.tf.x=(cv.clientWidth||800)/2-p.x*S.tf.k;S.tf.y=(cv.clientHeight||500)/2-p.y*S.tf.k;applyTf()}}}
+function centerOn(id){select(id,!0)}
+
+/* ---------- panneaux ---------- */
+const row=(k,v,cls)=>`<div class="nx-row${cls?" "+cls:""}"><div class="nx-k">${esc(k)}</div><div class="nx-v">${v}</div></div>`;
+const mono=s=>`<code>${esc(s)}</code>`;
+const link=(hash)=>{const ex=S.snap&&S.snap.explorer;return hash?(ex?`<a href="${esc(ex+hash)}" target="_blank" rel="noreferrer">${esc(short(hash,8))}</a>`:mono(short(hash,8))):"\u2014"};
+const sens=s=>s?`<span class="sensitive nx-sens" title="maintenir pour r\u00e9v\u00e9ler"><code>${esc(s)}</code></span>`:"\u2014";
+const poisHtml=p=>{if(!p)return`<span class="poi-chip none">${POI_FR.none}</span>`;return Object.entries(p).map(([k,v])=>`<span class="poi-chip ${esc(v)}" title="${esc(k)}">${esc(short(k,4))} \u00b7 ${esc(POI_FR[v]||v)}</span>`).join(" ")};
+const nodeLink=(id,label)=>`<a href="#" class="nx-go" data-go="${esc(id)}">${esc(label)}</a>`;
+function renderDetail(n){
+  const el=$("nxDetail");if(!el)return;
+  if(!n){el.innerHTML='<div class="nx-empty">S\u00e9lectionne une note, une transaction ou une anomalie.</div>';return}
+  let h="";
+  if(n.type==="note"){h+=`<h3>Note <code>${esc(short(n.hash,6))}</code></h3>`;h+=row("Valeur",`<b>${esc(fmtVal(n.value,n.dec,n.dec))} ${esc(n.sym)}</b> <span class="nx-dim">(${esc(n.value.toString())} unit\u00e9s)</span>`);h+=row("Origine",esc(ORIGIN_FR[n.origin]||n.origin));h+=row("\u00c9tat",`<span class="bk ${esc(n.bucket)}">${esc(BUCKET_FR[n.bucket]||n.bucket)}</span>${n.spent?" \u00b7 d\u00e9pens\u00e9e dans "+nodeLink(n.spentBy,short((S.view.nodes.get(n.spentBy)||{}).rid||n.spendtxid,6)):""}`);h+=row("POI par liste",poisHtml(n.pois));if(n.sentPois&&n.sentPois!==n.pois)h+=row("POI c\u00f4t\u00e9 envoi",poisHtml(n.sentPois));h+=row("Position",`arbre ${n.tree==null?"?":n.tree} \u00b7 feuille ${n.position==null?"?":n.position} \u00b7 globale ${n.gpos==null?"?":n.gpos}`);h+=row("Type",esc(n.ctype||"?"));h+=row("Bloc / date",`${n.block||"?"} \u00b7 ${fmtTs(n.ts)}`);h+=row("Tx de cr\u00e9ation",link(n.createdTx)+(n.createdRid?" \u00b7 rg "+mono(short(n.createdRid,6)):""));if(n.spent)h+=row("Tx de d\u00e9pense",link(n.spendtxid)+(n.spendUnresolved?' <span class="nx-warn">non r\u00e9solue dans le txid-tree</span>':""));h+=row("Hash (commitment)",mono(n.hash));h+=row("Nullifier",n.nullifier?mono(n.nullifier):"\u2014");h+=row("Blinded commitment",n.blinded?mono(n.blinded):"\u2014");h+=row("NPK",n.npk?mono(n.npk):"\u2014");h+=row("Random",sens(n.random),"nx-sensrow");if(n.memo)h+=row("M\u00e9mo",esc(n.memo));if(n.sender)h+=row("Exp\u00e9diteur (0zk)",mono(n.sender));if(n.recipient)h+=row("Destinataire (0zk)",mono(n.recipient));if(n.shieldFee&&n.shieldFee!=="0")h+=row("Frais de shield",esc(n.shieldFee));h+=row("Propri\u00e9t\u00e9",(n.mine?"re\u00e7ue par ce wallet":"non re\u00e7ue")+(n.sentByMe?" \u00b7 cr\u00e9\u00e9e par ce wallet":""));if(n.taint)h+=row("Taint",'<span class="nx-warn">en aval d\u2019une note bloqu\u00e9e</span>');const parent=n.parent&&S.view.nodes.get(n.parent);if(parent)h+=row("Cr\u00e9\u00e9e par",nodeLink(parent.id,parent.kind==="shield"?"shield "+short(parent.txid,4):"tx "+short(parent.rid||parent.txid,6)))}
+  else if(n.type==="tx"){h+=`<h3>${n.kind==="shield"?"Shield":n.kind==="external"?"Tx tierce":"Transaction Railgun"} <code>${esc(short(n.rid||n.txid||"",6))}</code></h3>`;h+=row("Tx cha\u00eene",link(n.txid));if(n.rid)h+=row("Railgun txid",mono(n.rid));h+=row("Bloc / date",`${n.block||"?"} \u00b7 ${fmtTs(n.ts)}`);h+=row("R\u00e9solution",n.resolved?"txid-tree":'<span class="nx-warn">non r\u00e9solue (arbre TXID)</span>');h+=row("Diffusion",n.fee?"broadcaster tiers (sortie de frais pr\u00e9sente)":(n.kind==="shield"?"self (EOA)":"self-broadcast probable (aucune sortie de frais)"));if(n.kind!=="shield")h+=row("POI de d\u00e9pense",poisHtml(n.pois));const ins=n.inputs.map(i=>S.view.nodes.get(i)).filter(Boolean),outs=n.outputs.map(i=>S.view.nodes.get(i)).filter(Boolean);const li=x=>x.type==="note"?nodeLink(x.id,fmtVal(x.value,x.dec,5)+" "+x.sym+" "+short(x.hash,4)):x.type==="unshield"?nodeLink(x.id,"unshield "+fmtVal(x.value,x.dec,5)+" "+x.sym):x.type==="ghost"?nodeLink(x.id,x.n+" "+(x.dir==="in"?"entr\u00e9e(s) tierce(s)":"non d\u00e9chiffr\u00e9e(s)")):esc(x.id);h+=row("Entr\u00e9es ("+ins.length+")",ins.length?ins.map(li).join("<br>"):"\u2014");h+=row("Sorties ("+outs.length+")",outs.length?outs.map(li).join("<br>"):"\u2014");if(n.valIn&&n.valIn.size){h+=row("Bilan",[...n.valIn].map(([k,v])=>{const o=n.valOut.get(k)||0n;const t=S.view.tokens.get(k);const d=(ins[0]&&ins[0].dec)||18;return esc(t?t.sym:k)+" : "+esc(fmtVal(v,d,6))+" \u2192 "+esc(fmtVal(o,d,6))+(v===o?" \u2713":(n.resolved&&!n.unknownIn&&!n.unknownOut?' <span class="nx-warn">\u2260</span>':" (partiel)"))}).join("<br>"))}if(n.resolved&&n.kind!=="shield"){h+=row("Nullifiers ("+n.nullifiers.length+")",n.nullifiers.map(x=>{const mine=ins.find(i=>i.nullifier===x);return mono(short(x,8))+(mine?" \u2713 ma note":" \u00b7 tiers")}).join("<br>")||"\u2014");h+=row("Commitments ("+n.commitments.length+")",n.commitments.map(x=>{const o=outs.find(i=>i.hash===x);return mono(short(x,8))+(o?(o.mine?" \u2713 ma note":" \u00b7 envoy\u00e9e"):" \u00b7 non d\u00e9chiffr\u00e9")}).join("<br>")||"\u2014");if(n.unshieldInfo)h+=row("Unshield (bound params)",`${esc(fmtVal(n.unshieldInfo.value,(outs.find(o=>o.type==="unshield")||{}).dec||18,6))} \u2192 ${mono(n.unshieldInfo.to||"?")}`);h+=row("boundParamsHash",n.bound?mono(n.bound):"\u2014");h+=row("verificationHash",n.vhash?mono(n.vhash):"\u2014");if(n.treeIn!=null)h+=row("Arbres",`in ${n.treeIn} \u2192 out ${n.treeOut} (batch \u00e0 ${n.batchStart})`)}}
+  else if(n.type==="unshield"){h+=`<h3>Unshield \u2192 public</h3>`;h+=row("Montant",`<b>${esc(fmtVal(n.value,n.dec,n.dec))} ${esc(n.sym)}</b>`+(n.fee!=null?` \u00b7 frais ${esc(fmtVal(n.fee,n.dec,n.dec))}`:""));h+=row("Destinataire",mono(n.to||"?"));h+=row("Tx cha\u00eene",link(n.txid));if(n.rid)h+=row("Railgun txid",mono(n.rid));h+=row("Bloc / date",`${n.block||"?"} \u00b7 ${fmtTs(n.ts)}`);h+=row("POI",poisHtml(n.pois));if(n.fromTree)h+=row("Source","bound params du txid-tree (aucun unshield event stock\u00e9)")}
+  else if(n.type==="ghost"){h+=`<h3>${n.dir==="in"?"Entr\u00e9es tierces":"Sorties non d\u00e9chiffr\u00e9es"} (${n.n})</h3>`;h+=row("Tx cha\u00eene",link(n.txid));h+=row(n.dir==="in"?"Nullifiers":"Commitments",n.items.map(x=>mono(short(x,8))).join("<br>"));h+=row("Lecture",n.dir==="in"?"Ces entr\u00e9es appartiennent \u00e0 un autre wallet (r\u00e9ception d\u2019un tiers).":"Sorties chiffr\u00e9es pour un tiers ou notes factices : la viewing key de ce wallet ne les ouvre pas.")}
+  else if(n.type==="chain"){h+=`<h3>Cha\u00eene de change repli\u00e9e (${n.n} sauts)</h3>`;h+=row("Blocs",`${n.block||"?"} \u2192 ${n.blockEnd||"?"}`);h+=row("Sorties annexes",n.side?n.side+" (frais / tiers / factices)":"aucune");h+=row("Tx repli\u00e9es",n.hops.map(x=>mono(short(x,6))).join("<br>"));h+=row("Astuce","d\u00e9coche \u00ab replier les cha\u00eenes \u00bb pour les d\u00e9plier")}
+  const rel=S.graph.anomalies.filter(a=>a.nodes.includes(n.id));if(rel.length)h+=row("Anomalies",rel.map(a=>`<span class="an-chip ${a.sev}">${esc(a.code)}</span> ${esc(a.msg)}`).join("<br>"));
+  el.innerHTML=h;
+  el.querySelectorAll(".nx-go").forEach(a=>a.onclick=e=>{e.preventDefault();centerOn(a.dataset.go)});
+  el.querySelectorAll(".nx-sens").forEach(x=>{const on=()=>x.classList.add("revealed"),off=()=>x.classList.remove("revealed");x.addEventListener("mousedown",on);x.addEventListener("touchstart",on,{passive:!0});["mouseup","mouseleave","touchend"].forEach(ev=>x.addEventListener(ev,off))});
+}
+function renderStats(){const el=$("nxStats");if(!el||!S.graph)return;const all=[...S.graph.nodes.values()];const mine=all.filter(n=>n.type==="note"&&n.mine);const un=mine.filter(n=>!n.spent),sp=mine.filter(n=>n.spent);const txs=all.filter(n=>n.type==="tx"&&n.kind!=="shield");const sh=all.filter(n=>n.type==="tx"&&n.kind==="shield");const us=all.filter(n=>n.type==="unshield");const ext=all.filter(n=>n.type==="note"&&!n.mine);const bal=new Map();for(const n of un){const k=n.tk.key;if(!bal.has(k))bal.set(k,{sym:n.sym,dec:n.dec,v:0n,spendable:0n});const b=bal.get(k);b.v+=n.value;if(n.bucket==="Spendable")b.spendable+=n.value}const high=S.graph.anomalies.filter(a=>a.sev==="high").length,warn=S.graph.anomalies.filter(a=>a.sev==="warn").length;const vis=S.view?S.view.nodes.size:0;el.innerHTML=[["notes re\u00e7ues",mine.length],["non d\u00e9pens\u00e9es",un.length],["d\u00e9pens\u00e9es",sp.length],["envoy\u00e9es \u00e0 des tiers",ext.length],["shields",sh.length],["tx",txs.length],["unshields",us.length],["listes POI",S.graph.lists.length||"?"],["affich\u00e9s",vis]].map(([k,v])=>`<div class="st"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("")+[...bal.values()].map(b=>`<div class="st tok"><b>${esc(fmtVal(b.v,b.dec,5))}</b><span>${esc(b.sym)} en notes \u00b7 ${esc(fmtVal(b.spendable,b.dec,5))} d\u00e9pensable</span></div>`).join("")+`<div class="st ${high?"high":warn?"warn":""}"><b>${high+warn}</b><span>anomalie(s) \u00b7 ${high} haute(s)</span></div>`}
+function renderAnomalies(){const el=$("nxAnom");if(!el||!S.graph)return;const A=S.graph.anomalies.slice().sort((a,b)=>({high:0,warn:1,info:2}[a.sev]-{high:0,warn:1,info:2}[b.sev]));if(!A.length){el.innerHTML='<div class="nx-empty">Aucune anomalie d\u00e9tect\u00e9e sur ce snapshot.</div>';return}el.innerHTML=A.map((a,i)=>`<div class="an ${a.sev}" data-i="${i}"><span class="an-chip ${a.sev}">${esc(a.code)}</span><span class="an-msg">${esc(a.msg)}</span><span class="an-n">${a.nodes.length}</span></div>`).join("");el.querySelectorAll(".an").forEach(d=>d.onclick=()=>{const a=A[+d.dataset.i];const target=a.nodes.find(id=>S.view.nodes.has(id));if(target)centerOn(target);else setStatus("Nœud masqu\u00e9 par les filtres courants (\u00e9largis les filtres).",!0)})}
+
+/* ---------- exports ---------- */
+const jsonSafe=(k,v)=>typeof v==="bigint"?v.toString():(v instanceof Map?Object.fromEntries(v):(v instanceof Set?[...v]:v));
+function exportJSON(){if(!S.graph)return;const nodes=[...S.graph.nodes.values()].map(n=>{const o=Object.assign({},n);delete o.tk;o.token=n.tk?n.tk.key:o.token;return o});const out={format:"noxaku-notes-graph",version:1,generatedAt:new Date().toISOString(),snapshot:Object.assign({},S.snap,{received:S.snap.received.map(r=>Object.assign({},r,{random:"[redacted]"})),sent:S.snap.sent.map(r=>Object.assign({},r,{random:"[redacted]"}))}),graph:{nodes:nodes.map(n=>{const c=Object.assign({},n);if(c.random)c.random="[redacted]";return c}),edges:S.graph.edges,anomalies:S.graph.anomalies,lists:S.graph.lists}};dl(new Blob([JSON.stringify(out,jsonSafe,2)],{type:"application/json"}),"noxaku-notes-"+ts()+".json")}
+function exportSVG(){const svg=document.getElementById("nxSvg");if(!svg)return;const css=`<style>${SVG_CSS}</style>`;const clone=svg.cloneNode(!0);clone.setAttribute("viewBox",`0 0 ${S.svgW+20} ${S.svgH+20}`);clone.removeAttribute("style");clone.querySelector("#nxView").setAttribute("transform","translate(10 10)");const s='<?xml version="1.0" encoding="UTF-8"?>'+clone.outerHTML.replace("<defs>",css+"<defs>");dl(new Blob([s],{type:"image/svg+xml"}),"noxaku-notes-"+ts()+".svg")}
+function dl(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),8000)}
+const ts=()=>new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
+const SVG_CSS=`.edge{fill:none;stroke:#9a9ab5;opacity:.85}.edge.ghost{stroke-dasharray:3 3}.edge.taint{stroke:#E1000F}.lab{font:10px 'JetBrains Mono',ui-monospace,monospace;fill:#3a3a52;text-anchor:middle}.lab.tx{fill:#000091}.lab.ghost{fill:#8a8aa5}.glyph{font:700 10px 'Inter',system-ui,sans-serif;text-anchor:middle;pointer-events:none}.bandlab{font:600 11px 'Inter',system-ui,sans-serif;fill:#55557a}`;
+
+/* ---------- recherche ---------- */
+function search(q){if(!S.view)return;q=(q||"").trim().toLowerCase();if(!q)return;const hit=[...S.view.nodes.values()].find(n=>[n.id,n.hash,n.txid,n.rid,n.createdTx,n.spendtxid,n.nullifier,n.blinded,n.to].filter(Boolean).some(x=>String(x).toLowerCase().includes(q)));if(hit)centerOn(hit.id);else setStatus("Aucun n\u0153ud ne correspond \u00e0 \u00ab "+q+" \u00bb (v\u00e9rifie les filtres).",!0)}
+
+/* ---------- montage ---------- */
+function bindUI(){
+  const on=(id,ev,fn)=>{const e=$(id);if(e)e.addEventListener(ev,fn)};
+  on("nxRefresh","click",()=>refresh(!0));
+  on("nxSync","click",()=>{const b=$("sync");if(b){b.click();setStatus("Synchronisation lanc\u00e9e (Mode labo \u00b7 \u00e9tape 4) \u2014 le graphe se rafra\u00eechira \u00e0 la fin.")}else setStatus("Bouton de synchronisation introuvable.",!0)});
+  on("nxFit","click",()=>fit());
+  on("nxJson","click",exportJSON);on("nxSvgExp","click",exportSVG);
+  on("nxTok","change",e=>{S.filters.token=e.target.value;draw()});
+  on("nxPoi","change",e=>{S.filters.poi=e.target.value;draw()});
+  on("nxMode","change",e=>{S.filters.mode=e.target.value;draw()});
+  [["nxSpent","spent"],["nxExt","external"],["nxCollapse","collapse"],["nxLabels","labels"]].forEach(([id,k])=>on(id,"change",e=>{S.filters[k]=e.target.checked;draw()}));
+  on("nxSearch","keydown",e=>{if(e.key==="Enter")search(e.target.value)});
+  on("nxSearchBtn","click",()=>search(($("nxSearch")||{}).value));
+  const ro=window.ResizeObserver?new ResizeObserver(()=>{if(S.opened&&document.getElementById("nxSvg"))applyTf()}):null;if(ro&&$("nxCanvas"))ro.observe($("nxCanvas"));
+  // rafra\u00eechissement automatique apr\u00e8s sync / POI (sorties du bundle)
+  let tmr=null;const obs=new MutationObserver(()=>{if(!S.opened)return;const v=$("notes");if(!v||!v.classList.contains("show"))return;clearTimeout(tmr);tmr=setTimeout(()=>refresh(!0),1800)});
+  ["shielded","shieldedAll","poiStatusOut"].forEach(id=>{const e=$(id);if(e)obs.observe(e,{childList:!0,characterData:!0,subtree:!0})});
+}
+function open(){S.opened=!0;if(!S.bound){bindUI();S.bound=!0}refresh(!1);setTimeout(()=>{if(document.getElementById("nxSvg"))fit()},50)}
+if(document.readyState==="complete")setTimeout(()=>{if(!S.bound){bindUI();S.bound=!0}},0);else window.addEventListener("load",()=>{if(!S.bound){bindUI();S.bound=!0}});
+window.NoxakuNotes={open,refresh:()=>refresh(!0),select:centerOn,state:S,_pure:{buildGraph,subgraph,collapseChains,components,layoutAll,renderSVG,fmtVal,bucketOf,worstPoi}};
+})();
+</script>
+</body>
+</html>
