@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Railgun wallet",
+  "version": "0.11.0",
+  "identifier": "com.zknox.railgunwallet",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "sh scripts/build-dist.sh",
+    "beforeDevCommand": "sh scripts/build-dist.sh"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Railgun wallet",
+        "width": 420,
+        "height": 900
+      }
+    ],
+    "security": {
+      "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost wss://*.rootedinprivacy.com:8000; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png"],
+    "android": {
+      "minSdkVersion": 26
+    }
+  }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "railgun-wallet-android"
+version = "0.11.0"
+edition = "2024"
+description = "Android host (Tauri v2) for the ZKNOX Railgun wallet core"
+publish = false
+
+[lib]
+name = "railgun_wallet_lib"
+# staticlib/cdylib: what `cargo tauri android build` links into the APK. `lib` keeps `cargo check`
+# usable on the desktop.
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = { workspace = true }
+railgun-wallet = { path = "../railgun-wallet", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-barcode-scanner = "2"
+tauri-plugin-biometric = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
+
+# Proving is where the phone is judged. rayon is already a transitive dependency of the SDK;
+# on Android it must be given the big cores, see the plan in README.md.

@@ -134,7 +134,12 @@ fn write_ledger_cache(path: &Path, spending_pubkey: SpendingPublicKey, address: 
 /// 30%. Half as much again leaves room for that and refuses anything predatory.
 const DEFAULT_MAX_FEE_RATE: &str = "1.5";
 
-const DEFAULT_GAS_MARGIN_PERCENT: u32 = 25;
+/// Margin on the simulated limits. The dominant one, the paymaster validation, needs 8.0 to
+/// 8.4% more than the gas the probe sees it use (63/64 forwarding over the nested calls; four
+/// live measurements on Sepolia, transfers and unshields). 12% leaves about 3.5% above that.
+/// The user pays for limits, not for gas used, and nothing is refunded: every point here is a
+/// point of fee.
+const DEFAULT_GAS_MARGIN_PERCENT: u32 = 12;
 const MAX_GAS_MARGIN_PERCENT: u32 = 200;
 
 /// Limits are rounded up to this, so the public fee says less about the transaction.
@@ -313,7 +318,7 @@ pub struct FeeLimits {
     /// which is what a hardware or threshold signer needs.
     #[serde(default)]
     pub single_proof: bool,
-    /// Margin added to the limits in single-proof mode, percent. Defaults to 25.
+    /// Margin added to the limits in single-proof mode, percent. Defaults to 12.
     pub gas_margin_percent: Option<u32>,
     /// Legacy: 0zk address of the broadcaster to use, instead of a draw among the cheapest.
     pub broadcaster: Option<String>,

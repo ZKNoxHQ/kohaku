@@ -5,12 +5,19 @@ edition = "2024"
 description = "ZKNOX local Railgun wallet (daemon + web front) built on the kohaku Rust SDK"
 publish = false
 
+[lib]
+name = "railgun_wallet"
+path = "src/lib.rs"
+
 [[bin]]
 name = "railgun-wallet"
 path = "src/main.rs"
+required-features = ["http"]
 
 [features]
-default = ["native-waku"]
+default = ["http", "native-waku"]
+# axum server and the embedded front. Off on mobile: the app calls `ipc::dispatch` directly.
+http = ["dep:axum"]
 # Native Waku light node (rust-libp2p) for the legacy transport: Waku mode "native". Without it,
 # "native" falls back to the node in the page ("browser").
 native-waku = ["railgun-broadcaster/light-node"]
@@ -19,7 +26,7 @@ native-waku = ["railgun-broadcaster/light-node"]
 alloy = { workspace = true, default-features = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"], optional = true }
 base64 = "0.22"
 bip32 = { version = "0.5", default-features = false, features = ["secp256k1", "std"] }
 bip39 = { version = "2", default-features = false, features = ["std"] }

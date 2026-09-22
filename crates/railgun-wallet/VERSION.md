@@ -28,6 +28,19 @@ work (`railgun-ledger`); 0.10.1 and 0.11.x belong to the Android branch, not mer
 * Known: a fleet node sometimes closes the connection once, 10 to 45 s after it opened; the node
   reconnects and subscribes again within about 12 s.
 
+## 0.10.1 (2026-09-21)
+
+* Default gas margin of "prove once" lowered from 25% to 12%. Four live runs on Sepolia
+  (two transfers, two unshields) show the paymaster validation needing 8.0 to 8.4% more than the
+  gas the probe measures, a stable gap explained by the 63/64 rule; 12% keeps about 3.5% above
+  it. On the transfer measured at 1,980,000 gas of limits, the same figures give about
+  1,780,000, 10% less fee. The field stays editable, and a margin that turns out too low still
+  stops the operation before anything is sent.
+* A browser that had stored the old default (25) gets the new one; a value you typed yourself is
+  kept.
+* The call limit of a native unshield keeps half the margin on top of the predicted bundler
+  figure (68,136 gives 80,000 at 6%).
+
 ## 0.10.0 (2026-09-20)
 
 Native unshield (unwrap and deliver the chain currency) on the legacy and direct transports.

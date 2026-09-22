@@ -1,20 +1,21 @@
-//! HTTP API consumed by the embedded front.
+//! HTTP API consumed by the embedded front. A thin axum wrapper over `ipc::dispatch`, which is
+//! also what the Android app calls over Tauri IPC (ADR-024).
 
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use crate::{
-    engine::{Command, Op, UnlockParams},
+    engine::Command,
+    ipc::{self, ApiError, Ctx},
     shared::SharedRef,
 };
 
@@ -30,18 +31,27 @@ pub struct AppState {
     pub origins: Arc<Vec<String>>,
 }
 
+impl AppState {
+    fn ctx(&self) -> Ctx {
+        Ctx {
+            shared: self.shared.clone(),
+            engine: self.engine.clone(),
+        }
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/waku-bundle.js", get(waku_bundle))
-        .route("/api/waku/exchange", post(waku_exchange))
-        .route("/api/defaults", get(defaults))
-        .route("/api/status", get(status))
-        .route("/api/unlock", post(unlock))
-        .route("/api/lock", post(lock))
-        .route("/api/empty-cache", post(empty_cache))
-        .route("/api/op", post(op))
-        .route("/api/jobs", get(jobs))
+        .route("/api/waku/exchange", post(call))
+        .route("/api/defaults", get(call))
+        .route("/api/status", get(call))
+        .route("/api/unlock", post(call))
+        .route("/api/lock", post(call))
+        .route("/api/empty-cache", post(call))
+        .route("/api/op", post(call))
+        .route("/api/jobs", get(call))
         .route("/api/jobs/{id}", get(job))
         .route("/api/logs", get(logs))
         .layer(axum::middleware::from_fn_with_state(
@@ -55,7 +65,7 @@ pub fn router(state: AppState) -> Router {
 /// the same browser could otherwise POST to it) and DNS-rebinding style Host headers.
 async fn same_origin(
     State(state): State<AppState>,
-    req: axum::extract::Request,
+    req: Request,
     next: axum::middleware::Next,
 ) -> Response {
     let headers = req.headers();
@@ -77,6 +87,45 @@ async fn same_origin(
 
 fn err(code: StatusCode, msg: impl Into<String>) -> Response {
     (code, Json(json!({ "error": msg.into() }))).into_response()
+}
+
+fn answer(result: Result<Value, ApiError>) -> Response {
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => {
+            let code = StatusCode::from_u16(e.code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            err(code, e.message)
+        }
+    }
+}
+
+/// Every endpoint whose path is its own route key: the body (if any) goes straight to dispatch.
+async fn call(State(state): State<AppState>, req: Request) -> Response {
+    let path = req.uri().path().to_string();
+    let body = match axum::body::to_bytes(req.into_body(), 2 * 1024 * 1024).await {
+        Ok(bytes) if bytes.is_empty() => None,
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(v) => Some(v),
+            Err(e) => return err(StatusCode::BAD_REQUEST, format!("bad request body: {e}")),
+        },
+        Err(_) => return err(StatusCode::BAD_REQUEST, "body too large"),
+    };
+    answer(ipc::dispatch(&state.ctx(), &path, body).await)
+}
+
+async fn job(State(state): State<AppState>, Path(id): Path<u64>) -> Response {
+    answer(ipc::dispatch(&state.ctx(), &format!("/api/jobs/{id}"), None).await)
+}
+
+#[derive(serde::Deserialize)]
+struct LogsQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+async fn logs(State(state): State<AppState>, Query(q): Query<LogsQuery>) -> Response {
+    let body = json!({ "since": q.since });
+    answer(ipc::dispatch(&state.ctx(), "/api/logs", Some(body)).await)
 }
 
 async fn index() -> impl IntoResponse {
@@ -101,191 +150,12 @@ async fn index() -> impl IntoResponse {
 async fn waku_bundle() -> impl IntoResponse {
     (
         [
-            (header::CONTENT_TYPE, HeaderValue::from_static("text/javascript; charset=utf-8")),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/javascript; charset=utf-8"),
+            ),
             (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
         ],
         WAKU_BUNDLE_JS,
     )
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExchangeMessage {
-    content_topic: String,
-    /// base64
-    payload: String,
-    #[serde(default)]
-    timestamp_ns: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExchangeBody {
-    connected: bool,
-    #[serde(default)]
-    peers: usize,
-    #[serde(default)]
-    detail: Option<String>,
-    #[serde(default)]
-    messages: Vec<ExchangeMessage>,
-    /// Outcome of the publishes handed out at earlier exchanges.
-    #[serde(default)]
-    acks: Vec<ExchangeAck>,
-}
-
-#[derive(Deserialize)]
-struct ExchangeAck {
-    id: u64,
-    #[serde(default)]
-    peers: usize,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-/// Round trip with the Waku node of the wallet tab: takes what it received, returns what it must
-/// publish. Payloads are opaque here, fee messages are authenticated further down.
-async fn waku_exchange(State(state): State<AppState>, Json(body): Json<ExchangeBody>) -> Response {
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    use railgun_broadcaster::{PublishAck, RemoteStatus, transport::WakuMessage};
-
-    let received = body
-        .messages
-        .into_iter()
-        .filter_map(|m| {
-            Some(WakuMessage {
-                content_topic: m.content_topic,
-                payload: STANDARD.decode(m.payload.as_bytes()).ok()?,
-                timestamp_ns: m.timestamp_ns.and_then(|t| t.parse().ok()),
-            })
-        })
-        .collect();
-    let publish: Vec<Value> = state
-        .shared
-        .bridge
-        .exchange(
-            RemoteStatus {
-                connected: body.connected,
-                peers: body.peers,
-                detail: body.detail,
-            },
-            received,
-            body.acks
-                .into_iter()
-                .map(|a| PublishAck {
-                    id: a.id,
-                    peers: a.peers,
-                    error: a.error,
-                })
-                .collect(),
-        )
-        .into_iter()
-        .map(|o| json!({ "id": o.id, "contentTopic": o.content_topic, "payload": STANDARD.encode(&o.payload) }))
-        .collect();
-    Json(json!({ "publish": publish })).into_response()
-}
-
-/// Non-secret defaults the front prefills the unlock form with.
-async fn defaults() -> Response {
-    Json(json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "nativeWaku": crate::engine::NATIVE_WAKU,
-        "waku": {
-            "clusterId": railgun_broadcaster::wire::CLUSTER_ID,
-            "shardId": railgun_broadcaster::wire::SHARD_ID,
-            "bootstrapPeers": railgun_broadcaster::wire::FLEET_WSS_PEERS,
-        },
-        "trustedFeeSigners": railgun_broadcaster::RAILWAY_TRUSTED_FEE_SIGNERS,
-        "trustedFeeSignersSource": "Railway wallet remote configuration, read 2026-09-20",
-    }))
-    .into_response()
-}
-
-async fn status(State(state): State<AppState>) -> Response {
-    let snapshot = state.shared.status.read().map(|s| s.clone());
-    let active = state.shared.jobs.lock().ok().and_then(|j| j.active());
-    let legacy = state.shared.legacy.read().map(|l| l.clone()).unwrap_or_default();
-    match snapshot {
-        Ok(s) => Json(json!({ "status": s, "activeJob": active, "legacy": legacy })).into_response(),
-        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "state poisoned"),
-    }
-}
-
-async fn unlock(State(state): State<AppState>, Json(params): Json<UnlockParams>) -> Response {
-    let (tx, rx) = oneshot::channel();
-    if state
-        .engine
-        .send(Command::Unlock(Box::new(params), tx))
-        .await
-        .is_err()
-    {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
-    }
-    match rx.await {
-        Ok(Ok(())) => Json(json!({ "ok": true })).into_response(),
-        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, e),
-        Err(_) => err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped"),
-    }
-}
-
-async fn lock(State(state): State<AppState>) -> Response {
-    let (tx, rx) = oneshot::channel();
-    if state.engine.send(Command::Lock(tx)).await.is_err() || rx.await.is_err() {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
-    }
-    Json(json!({ "ok": true })).into_response()
-}
-
-async fn empty_cache(State(state): State<AppState>) -> Response {
-    // Queued behind a running job like any command: never deletes under a sync or a proof.
-    let (tx, rx) = oneshot::channel();
-    if state.engine.send(Command::EmptyCache(tx)).await.is_err() {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
-    }
-    match rx.await {
-        Ok(Ok(removed)) => Json(json!({ "ok": true, "removed": removed })).into_response(),
-        Ok(Err(e)) => err(StatusCode::CONFLICT, e),
-        Err(_) => err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped"),
-    }
-}
-
-async fn op(State(state): State<AppState>, Json(op): Json<Op>) -> Response {
-    let unlocked = state.shared.status.read().map(|s| s.unlocked).unwrap_or(false);
-    if !unlocked {
-        return err(StatusCode::CONFLICT, "wallet is locked");
-    }
-    let id = match state.shared.jobs.lock() {
-        Ok(mut jobs) => jobs.create(op.kind()),
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "state poisoned"),
-    };
-    if state.engine.send(Command::Job { id, op }).await.is_err() {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "engine stopped");
-    }
-    Json(json!({ "jobId": id })).into_response()
-}
-
-async fn jobs(State(state): State<AppState>) -> Response {
-    match state.shared.jobs.lock() {
-        Ok(jobs) => Json(json!({ "jobs": jobs.all() })).into_response(),
-        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "state poisoned"),
-    }
-}
-
-async fn job(State(state): State<AppState>, Path(id): Path<u64>) -> Response {
-    match state.shared.jobs.lock().ok().and_then(|j| j.get(id)) {
-        Some(job) => Json::<Value>(json!(job)).into_response(),
-        None => err(StatusCode::NOT_FOUND, "unknown job"),
-    }
-}
-
-#[derive(Deserialize)]
-struct LogsQuery {
-    #[serde(default)]
-    since: u64,
-}
-
-async fn logs(State(state): State<AppState>, Query(q): Query<LogsQuery>) -> Response {
-    match state.shared.logs.lock() {
-        Ok(logs) => Json(json!({ "lines": logs.since(q.since) })).into_response(),
-        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "state poisoned"),
-    }
 }

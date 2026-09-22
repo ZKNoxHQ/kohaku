@@ -1,0 +1,22 @@
+<!-- To merge into gen/android/app/src/main/AndroidManifest.xml after `cargo tauri android init`.
+     Tauri generates that file once; it is then yours to edit. -->
+
+<!-- Sync and proving must survive the screen going off: a foreground service with a
+     notification. Android 14 requires the type and its own permission. -->
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.CAMERA" />          <!-- QR scan of 0zk addresses -->
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+<!-- Inside <application>: -->
+<service
+    android:name=".EngineService"
+    android:exported="false"
+    android:foregroundServiceType="dataSync" />
+
+<!-- On <activity android:name=".MainActivity">, so a rotation does not restart the WebView and
+     kill the js-waku node with it (ADR-028). -->
+<!-- android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" -->
+<!-- android:launchMode="singleTask" -->

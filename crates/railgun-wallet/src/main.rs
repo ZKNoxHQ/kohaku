@@ -1,18 +1,10 @@
 //! ZKNOX Railgun wallet: local daemon plus embedded web front on top of the kohaku Rust SDK.
 
-mod api;
-mod db;
-mod engine;
-mod keys;
-mod shared;
-
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, bail};
+use railgun_wallet::{api, ipc};
 use tracing::info;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-
-use crate::shared::{FrontLogLayer, Shared};
 
 struct Args {
     port: u16,
@@ -44,29 +36,14 @@ fn parse_args() -> Result<Args> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = parse_args()?;
-    let shared = Arc::new(Shared::default());
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,railgun=info,railgun_wallet=info"));
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(FrontLogLayer(shared.clone()))
-        .init();
-
-    std::fs::create_dir_all(&args.data_dir)?;
-    let engine = engine::spawn(
-        shared.clone(),
-        args.data_dir.clone(),
-        tokio::runtime::Handle::current(),
-    );
+    let boot = ipc::boot(args.data_dir.clone(), tokio::runtime::Handle::current())?;
 
     // Loopback only: the API accepts key material.
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
     let origin = format!("http://{addr}");
     let app = api::router(api::AppState {
-        shared,
-        engine,
+        shared: boot.shared,
+        engine: boot.engine,
         origins: Arc::new(vec![origin.clone(), format!("http://localhost:{}", args.port)]),
     });
 
