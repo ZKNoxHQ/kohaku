@@ -52,11 +52,15 @@ Then, from the worktree:
 
 ```sh
 cd ~/Desktop/github/kohaku-railgun-wallet/crates/railgun-wallet-android
-sh scripts/build-dist.sh
+sh scripts/build-dist.sh          # every time the front changes: Tauri does not run it for you
 cargo tauri android init          # generates gen/android, once
 cargo tauri android dev           # device over adb, or an emulator
 cargo tauri android build --apk --release
 ```
+
+`build-dist.sh` is not wired as a `beforeBuildCommand`: Tauri runs those from the parent of the
+config's directory, so the relative path breaks. The CI calls it as its own step, and locally it
+is one line before the build.
 
 `cargo tauri android init` writes `gen/android`. Merge `android/AndroidManifest.additions.xml`
 into `gen/android/app/src/main/AndroidManifest.xml` and copy `android/EngineService.kt` next to

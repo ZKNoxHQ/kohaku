@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.3 (2026-09-22)
+
+`beforeBuildCommand` and `beforeDevCommand` dropped from `tauri.conf.json`. Tauri runs them from
+the parent of the config's directory, so `sh scripts/build-dist.sh` resolved against `crates/`
+and the build died before touching Rust. The CI already calls the script as its own step; locally
+it is one line before the build, and the README says so.
+
 ## 0.11.2 (2026-09-22)
 
 Three build fixes, found on the first CI run.
