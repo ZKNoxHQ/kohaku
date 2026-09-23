@@ -1,6 +1,6 @@
 [package]
 name = "railgun-broadcaster"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 description = "Client for the Railgun community broadcaster network (Waku transport)"
 publish = false
@@ -23,20 +23,44 @@ ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 railgun = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls"] }
+reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time", "sync"] }
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 waku-light = { path = "../waku-light", optional = true }
+web-time = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true, features = ["rustls"] }
+tokio = { workspace = true, features = ["time"] }
+
+# Browser: timers from the page's event loop.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-timer = { version = "3", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 railgun-broadcaster = { path = ".", features = ["testing"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { workspace = true }
 
+# Browser demo (examples/web_light_fees.rs, examples/web/).
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+tracing-wasm = { workspace = true }
+
 [[example]]
 name = "light_fees"
+required-features = ["light-node"]
+
+[[example]]
+name = "web_light_fees"
+crate-type = ["cdylib"]
 required-features = ["light-node"]

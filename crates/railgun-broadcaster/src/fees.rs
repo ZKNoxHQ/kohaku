@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use railgun::{account::address::RailgunAddress, crypto::keys::HexKey};
@@ -214,8 +213,8 @@ fn mul_div(a: u128, b: u128, d: u128) -> Option<u128> {
 }
 
 pub fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    crate::time::SystemTime::now()
+        .duration_since(crate::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }

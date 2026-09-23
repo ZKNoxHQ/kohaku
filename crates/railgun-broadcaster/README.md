@@ -47,6 +47,16 @@ Passive check against the fleet (prints the authenticated offers, publishes noth
 cargo run --release -p railgun-broadcaster --features light-node --example light_fees -- 11155111 90
 ```
 
+### In a browser (wasm32)
+
+The crate and `LightNodeTransport` build for `wasm32-unknown-unknown`: the light node then uses
+the browser's WebSocket (see `waku-light`). Demo page running the whole client, passive:
+
+```sh
+crates/railgun-broadcaster/examples/web/build.sh
+python3 -m http.server 8089 -d crates/railgun-broadcaster/examples/web   # http://localhost:8089
+```
+
 ### js-waku in a browser tab, local nwaku
 
 `BrowserBridge` hands messages to and from a js-waku node running in the wallet's tab. The rest

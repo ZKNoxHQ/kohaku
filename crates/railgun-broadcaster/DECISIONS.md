@@ -50,3 +50,11 @@ build does not pull libp2p for users of `NwakuRest` or the bridge. The adapter m
 state onto the trait without new error variants: not ready is `Remote`, like the bridge, so the
 wallet's retry loop is unchanged. Publishing waits for the light push answers, which gives the
 caller a definite outcome; the bridge could only report it at the next exchange.
+
+## ADR-007: same client in the browser, with `?Send` futures there only
+
+A pure web wallet needs the whole broadcaster client in the page or its worker, not only the
+Waku node. The browser forbids nothing the client does except the clock and timers, handled by a
+`time` module on `web-time`, and `Send` futures, which JS-backed objects cannot give. The trait
+keeps `Send + Sync` on the object and switches only its futures to `?Send` on wasm32, so native
+callers (the daemon's I/O runtime spawns them) are unchanged.

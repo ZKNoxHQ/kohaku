@@ -2,8 +2,8 @@
 //! to receive, light push to send, over wss on `:8000`. Replaces the js-waku node of the wallet
 //! tab ([`super::bridge`]) with nothing to keep open and no JavaScript.
 //!
-//! The node starts on the first call, on the caller's tokio runtime, and stops when the transport
-//! is dropped.
+//! The node starts on the first call, on the caller's runtime (tokio natively, the page's event
+//! loop in a browser), and stops when the transport is dropped.
 
 use std::sync::{Arc, Mutex};
 
@@ -68,7 +68,8 @@ impl LightNodeTransport {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl WakuTransport for LightNodeTransport {
     async fn subscribe(&self) -> Result<(), TransportError> {
         let node = self.node()?;
@@ -138,7 +139,7 @@ impl WakuTransport for LightNodeTransport {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

@@ -35,7 +35,8 @@ impl MemoryHub {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl WakuTransport for MemoryTransport {
     async fn subscribe(&self) -> Result<(), TransportError> {
         Ok(())

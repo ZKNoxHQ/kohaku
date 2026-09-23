@@ -40,7 +40,8 @@ pub enum TransportError {
     Malformed(String),
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait WakuTransport: Send + Sync {
     /// Makes sure the node relays the Railgun shard. Idempotent.
     async fn subscribe(&self) -> Result<(), TransportError>;

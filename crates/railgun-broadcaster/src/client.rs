@@ -268,8 +268,8 @@ impl BroadcasterClient {
         // Answers to earlier requests cannot be ours.
         self.responses.lock().unwrap().clear();
 
-        let started = tokio::time::Instant::now();
-        let mut last_publish: Option<tokio::time::Instant> = None;
+        let started = crate::time::Instant::now();
+        let mut last_publish: Option<crate::time::Instant> = None;
         info!(
             "relaying through broadcaster {}…",
             &request.broadcaster[..request.broadcaster.len().min(16)]
@@ -286,7 +286,7 @@ impl BroadcasterClient {
                     Ok(()) => debug!("transact request published"),
                     Err(e) => warn!("publish failed, will retry: {e}"),
                 }
-                last_publish = Some(tokio::time::Instant::now());
+                last_publish = Some(crate::time::Instant::now());
             }
 
             if let Err(e) = self.pump().await {
@@ -300,7 +300,7 @@ impl BroadcasterClient {
                     response.error.unwrap_or_else(|| "no reason given".into()),
                 ));
             }
-            tokio::time::sleep(POLL_INTERVAL).await;
+            crate::time::sleep(POLL_INTERVAL).await;
         }
     }
 

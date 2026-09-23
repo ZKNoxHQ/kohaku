@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 //! Wallet and broadcaster talking through the in-memory Waku hub.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};

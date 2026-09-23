@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0 (2026-09-23)
+
+Browser target (wasm32-unknown-unknown), on top of waku-light 0.3.
+
+* `WakuTransport` and its implementations use `async_trait(?Send)` on wasm32, where futures
+  built on JS objects are not `Send`; native builds keep `Send` futures.
+* New `time` module (`Instant`, `SystemTime`, `sleep`) from `web-time`, tokio natively,
+  wasm-bindgen timers in a browser. `BroadcasterClient::send` (republish and response wait),
+  `fees::now_ms`, the tab bridge and the nwaku timestamp go through it; `std::time` and
+  `tokio::time` are no longer called directly.
+* Dependencies split by target: tokio `time` and reqwest `rustls` native only, futures-timer
+  (`wasm-bindgen`) wasm only. `light-node` now works on both targets.
+* Browser demo: example `web_light_fees` (cdylib) and `examples/web/` (page, build script, port
+  8089). The whole `BroadcasterClient` runs in the page: fee announcements authenticated, capped
+  by the Railway trusted signers when enabled, listed with their rates. Passive.
+* Tests and native examples are `cfg`-gated out of wasm builds; native behaviour unchanged.
+
 ## 0.6.1 (2026-09-23)
 
 * `WakuTransport::publish_stats` (default `None`), implemented by `BrowserBridge` and

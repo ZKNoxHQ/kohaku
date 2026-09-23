@@ -11,10 +11,12 @@
 use std::{
     collections::VecDeque,
     sync::Mutex,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use async_trait::async_trait;
+
+use crate::time::Instant;
 
 use super::{TransportError, WakuMessage, WakuTransport};
 
@@ -143,7 +145,8 @@ impl BrowserBridge {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl WakuTransport for BrowserBridge {
     async fn subscribe(&self) -> Result<(), TransportError> {
         // The remote node subscribes on its own; this only reports whether it is there.

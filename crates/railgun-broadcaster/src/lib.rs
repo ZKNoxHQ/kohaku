@@ -14,6 +14,7 @@
 pub mod client;
 pub mod crypto;
 pub mod fees;
+pub mod time;
 #[cfg(any(test, feature = "testing"))]
 pub mod mock;
 pub mod transport;
