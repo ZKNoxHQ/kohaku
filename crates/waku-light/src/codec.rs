@@ -41,7 +41,7 @@ async fn read_uvarint<R: AsyncRead + Unpin>(io: &mut R) -> io::Result<u64> {
     Err(io::Error::new(io::ErrorKind::InvalidData, "varint too long"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::proto::{WakuMessage, WakuMetadataRequest};

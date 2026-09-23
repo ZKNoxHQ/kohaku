@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 //! A fake Waku service node (filter + light push + metadata) on a local `/ws` listener, driven
 //! by the real `LightNode` over websocket + noise + yamux.
 

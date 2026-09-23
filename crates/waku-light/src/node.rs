@@ -17,7 +17,7 @@ use libp2p::{
         transport::Boxed,
         upgrade::{SelectUpgrade, Version as UpgradeVersion},
     },
-    dns, identify,
+    identify,
     identity::Keypair,
     multiaddr::Protocol,
     noise, ping,
@@ -25,7 +25,7 @@ use libp2p::{
         ConnectionId, DialError, NetworkBehaviour, SwarmEvent,
         dial_opts::{DialOpts, PeerCondition},
     },
-    tcp, websocket, yamux,
+    yamux,
 };
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
@@ -174,7 +174,15 @@ fn split_bootstrap(addrs: &[Multiaddr], base_delay: Duration) -> Result<Vec<Boot
         .collect()
 }
 
-fn build_transport(key: &Keypair, dial_timeout: Duration) -> Result<Boxed<(PeerId, StreamMuxerBox)>, Error> {
+#[cfg(not(target_arch = "wasm32"))]
+type BaseTransport = libp2p::websocket::Config<libp2p::dns::tokio::Transport<libp2p::tcp::tokio::Transport>>;
+#[cfg(target_arch = "wasm32")]
+type BaseTransport = libp2p::websocket_websys::Transport;
+
+/// Native: libp2p's WebSocket transport over DNS + TCP, TLS by rustls.
+#[cfg(not(target_arch = "wasm32"))]
+fn base_transport() -> BaseTransport {
+    use libp2p::{dns, tcp, websocket};
     let tcp = || tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
     // Android and some sandboxes have no resolv.conf: fall back to public resolvers.
     let dns = dns::tokio::Transport::system(tcp()).unwrap_or_else(|e| {
@@ -187,14 +195,34 @@ fn build_transport(key: &Keypair, dial_timeout: Duration) -> Result<Boxed<(PeerI
             dns::ResolverOpts::default(),
         )
     });
+    websocket::Config::new(dns)
+}
+
+/// Browser: the page's (or worker's) own WebSocket; DNS and TLS are the browser's.
+#[cfg(target_arch = "wasm32")]
+fn base_transport() -> BaseTransport {
+    libp2p::websocket_websys::Transport::default()
+}
+
+fn build_transport(key: &Keypair, dial_timeout: Duration) -> Result<Boxed<(PeerId, StreamMuxerBox)>, Error> {
     let noise = noise::Config::new(key).map_err(|e| Error::Setup(e.to_string()))?;
-    Ok(websocket::Config::new(dns)
+    Ok(base_transport()
         .upgrade(UpgradeVersion::V1Lazy)
         .authenticate(noise)
         .multiplex(SelectUpgrade::new(yamux::Config::default(), libp2p_mplex::Config::new()))
         .timeout(dial_timeout)
         .map(|(peer, muxer), _| (peer, StreamMuxerBox::new(muxer)))
         .boxed())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn swarm_config() -> libp2p::swarm::Config {
+    libp2p::swarm::Config::with_tokio_executor()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn swarm_config() -> libp2p::swarm::Config {
+    libp2p::swarm::Config::with_wasm_executor()
 }
 
 impl LightNode {
@@ -222,8 +250,7 @@ impl LightNode {
             transport,
             behaviour,
             local_peer_id,
-            libp2p::swarm::Config::with_tokio_executor()
-                .with_idle_connection_timeout(Duration::from_secs(365 * 24 * 3600)),
+            swarm_config().with_idle_connection_timeout(Duration::from_secs(365 * 24 * 3600)),
         );
 
         let pushes = control

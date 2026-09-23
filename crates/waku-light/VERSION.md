@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 (2026-09-23)
+
+Browser target (wasm32-unknown-unknown), compile step. Native behaviour unchanged.
+
+* Transport chosen by target: native keeps libp2p's WebSocket over DNS + TCP with rustls; wasm32
+  uses `libp2p-websocket-websys`, the page's or worker's own `WebSocket`, so DNS and TLS
+  (TLS 1.2 to the fleet's BearSSL included) are the browser's. Noise, yamux / mplex, identify,
+  ping, `libp2p-stream` and all Waku protocol code are shared.
+* Swarm executor: tokio natively, `with_wasm_executor()` in a browser.
+* `rt` on wasm32: `spawn_local`, `futures-timer` (wasm-bindgen timers) for sleep, timeout and
+  interval, `MaybeSend` without `Send`.
+* Dependencies split by target: tokio `rt`/`time`, DNS, TCP, rustls and hickory are native only;
+  websocket-websys, futures-timer (`wasm-bindgen`), wasm-bindgen-futures and the JS backends of
+  getrandom 0.2 / 0.3 / 0.4 are wasm only. tokio keeps `sync` and `macros` on both.
+* Tests and examples that need tokio or a listener are native only (`cfg`); the 12 native tests
+  are unchanged.
+* To validate on a machine with the wasm32 target:
+  `cargo check -p waku-light --target wasm32-unknown-unknown`. The functional browser test
+  (a page listening to the fleet) is the next step.
+
 ## 0.2.0 (2026-09-23)
 
 First step towards a browser build (pure web wallet). No behaviour change on native targets.

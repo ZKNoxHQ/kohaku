@@ -133,7 +133,7 @@ pub enum Error {
     Stopped,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     /// The Railgun fleet (nwaku, BearSSL) only speaks TLS 1.2 on wss. Without the `tls12` feature
     /// of rustls every dial ends in a `HandshakeFailure` alert.

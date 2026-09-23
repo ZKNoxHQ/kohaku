@@ -37,10 +37,13 @@ let status = node.status();                                   // peers, service 
 
 ## Targets
 
-Native (Linux, macOS, Android): tokio, TCP + DNS + rustls. A browser build (wasm32) is in
-progress: everything platform-dependent goes through the `rt` module (executor, timers, clock),
-and the transport will be the browser's own WebSocket (`libp2p-websocket-websys`), which also
-leaves TLS to the browser.
+* Native (Linux, macOS, Android): tokio, libp2p WebSocket over TCP + DNS, rustls.
+* Browser (wasm32-unknown-unknown, window or Web Worker): the browser's own WebSocket
+  (`libp2p-websocket-websys`), which leaves DNS and TLS to the browser; `spawn_local` and
+  wasm-bindgen timers. `cargo check -p waku-light --target wasm32-unknown-unknown`.
+
+Everything platform-dependent goes through the `rt` module (executor, timers, clock) and the
+`base_transport` / `swarm_config` pair in `node.rs`; the Waku protocols are shared.
 
 ## Checking against the Railgun fleet
 

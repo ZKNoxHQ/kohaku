@@ -66,3 +66,19 @@ on native targets and will be empty on wasm32, where `spawn` maps to `spawn_loca
 The protocol code (framing, protobufs, filter, light push, metadata, deduplication, identity
 handling) is target-independent already. What remains target-specific after this seam is the
 transport (TCP + DNS + rustls natively, the browser's WebSocket in wasm) and the swarm executor.
+
+## ADR-009: the browser build uses the browser's WebSocket, not libp2p's
+
+In a page there are no sockets, so `libp2p-websocket` (TCP underneath) cannot work;
+`libp2p-websocket-websys` wraps `web_sys::WebSocket` instead. The browser then does DNS and TLS,
+which removes the rustls TLS 1.2 question (ADR-006) on that target: browsers negotiate TLS 1.2
+with the fleet's BearSSL, as js-waku shows. The pin logic (ADR-007) is unchanged, since noise
+still runs inside the WebSocket and reports the remote's libp2p identity.
+
+The transport works in a window or a Web Worker (it looks for either global scope). A worker is
+the intended host for a wallet, since background tabs throttle timers; the filter ping period of
+60 s tolerates the one-minute floor anyway.
+
+Randomness: three getrandom generations are in the graph (0.2 via rand 0.8 in libp2p-identity,
+0.3 via snow in noise, 0.4 via k256); each gets its JS backend feature on wasm32, and 0.3 also
+the `getrandom_backend` cfg the workspace already sets for its other wasm crates.
