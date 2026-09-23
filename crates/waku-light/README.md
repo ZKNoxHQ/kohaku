@@ -42,6 +42,14 @@ let status = node.status();                                   // peers, service 
   (`libp2p-websocket-websys`), which leaves DNS and TLS to the browser; `spawn_local` and
   wasm-bindgen timers. `cargo check -p waku-light --target wasm32-unknown-unknown`.
 
+Browser demo, passive (lists the broadcasters announcing fees on the chosen chain):
+
+```sh
+cargo install wasm-bindgen-cli --version 0.2.108 --locked   # once, matches the workspace pin
+crates/waku-light/examples/web/build.sh
+python3 -m http.server 8088 -d crates/waku-light/examples/web   # then http://localhost:8088
+```
+
 Everything platform-dependent goes through the `rt` module (executor, timers, clock) and the
 `base_transport` / `swarm_config` pair in `node.rs`; the Waku protocols are shared.
 

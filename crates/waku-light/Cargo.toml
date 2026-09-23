@@ -1,6 +1,6 @@
 [package]
 name = "waku-light"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 description = "Waku light client (filter v2 + light push v2/v3 + metadata) on rust-libp2p"
 publish = false
@@ -48,3 +48,14 @@ getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { workspace = true }
+
+# Browser demo (examples/web_fleet.rs, examples/web/): wasm-bindgen glue, console logs and panics.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+tracing-wasm = { workspace = true }
+
+[[example]]
+name = "web_fleet"
+crate-type = ["cdylib"]

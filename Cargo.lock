@@ -8789,14 +8789,16 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "waku-light"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
+ "console_error_panic_hook",
  "futures",
  "futures-timer",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
  "hickory-resolver",
+ "js-sys",
  "libp2p",
  "libp2p-mplex",
  "libp2p-stream",
@@ -8807,6 +8809,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "tracing-wasm",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-time",
 ]

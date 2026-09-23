@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 (2026-09-23)
+
+* Browser demo: example `web_fleet` (cdylib, wasm-bindgen) and `examples/web/` (page, build
+  script). The page starts a `LightNode` over the browser's WebSocket, subscribes to the fees
+  topic of a chosen chain and lists the broadcasters it hears (address, version, wallets,
+  reliability, tokens, offer expiry). Passive, publishes nothing. Built with
+  `examples/web/build.sh` (wasm32 target, wasm-bindgen-cli 0.2.108 as pinned by the workspace),
+  served with `python3 -m http.server`.
+* On native targets the example compiles to an empty library, so `cargo test` is unaffected.
+
 ## 0.3.0 (2026-09-23)
 
 Browser target (wasm32-unknown-unknown), compile step. Native behaviour unchanged.
