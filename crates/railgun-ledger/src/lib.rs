@@ -23,3 +23,6 @@ pub mod transport;
 
 pub use signer::{LedgerError, LedgerSigner};
 pub use transport::{Apdu, ApduResponse, Exchange, TransportError};
+
+#[cfg(all(native, feature = "ble"))]
+pub use transport::ble::BleLedger;

@@ -156,9 +156,10 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
     <label for="f-source">Keys</label>
     <select id="f-source">
       <option value="phrase">Recovery phrase (software keys)</option>
-      <option value="ledger">Ledger device (ZKNOX Railgun app)</option>
+      <option value="ledger">Ledger device — USB</option>
+      <option value="ledger-ble">Ledger device — Bluetooth (Flex/Stax/Nano X)</option>
     </select>
-    <p class="hint" id="ledger-hint" hidden>The spending key stays on the device: opening the wallet asks for three confirmations on it (spending key, viewing key, viewing pubkey), and every transfer or unshield is a blind-sign review. Plug the device in, unlock it and open the RAILGUN app before continuing.</p>
+    <p class="hint" id="ledger-hint" hidden>The spending key stays on the device: opening the wallet asks for three confirmations on it (spending key, viewing key, viewing pubkey), and every transfer or unshield is a blind-sign review. Unlock the device and open the ZKNOX Railgun app first — over USB plug it in; over Bluetooth pair it and turn Bluetooth on.</p>
 
     <div id="wrap-phrase">
     <label for="f-mnemonic">Recovery phrase</label>
@@ -632,7 +633,7 @@ async function submitOp(body) {
 }
 
 $("f-source").addEventListener("change", () => {
-  const ledger = $("f-source").value === "ledger";
+  const ledger = $("f-source").value.startsWith("ledger");
   $("wrap-phrase").hidden = ledger;
   $("wrap-derivation").hidden = ledger;
   $("wrap-rawkeys").hidden = ledger;
@@ -641,16 +642,20 @@ $("f-source").addEventListener("change", () => {
 
 $("btn-unlock").addEventListener("click", async () => {
   savePrefs();
-  const ledger = $("f-source").value === "ledger";
+  const source = $("f-source").value;
+  const ledger = source.startsWith("ledger");
+  const ledgerTransport = source === "ledger-ble" ? "ble" : "usb";
   const btn = $("btn-unlock"); btn.disabled = true;
   $("unlock-msg").textContent = ledger
-    ? "Opening: confirm the three prompts on the Ledger (spending key, viewing key, viewing pubkey)…"
+    ? (ledgerTransport === "ble"
+        ? "Opening over Bluetooth: scanning for the Ledger, then confirm the three prompts on it…"
+        : "Opening: confirm the three prompts on the Ledger (spending key, viewing key, viewing pubkey)…")
     : "Opening: loading the local database and registering the keys…";
   banner("");
   try {
     await api("/api/unlock", {
       chainId: Number($("f-chain").value), rpcUrl: $("f-rpc").value.trim(),
-      ledger,
+      ledger, ledgerTransport,
       mnemonic: ledger ? null : ($("f-mnemonic").value.trim() || null),
       spendingKey: ledger ? null : ($("f-spend").value.trim() || null),
       viewingKey: ledger ? null : ($("f-view").value.trim() || null),

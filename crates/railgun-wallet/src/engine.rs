@@ -189,6 +189,8 @@ pub struct UnlockParams {
     /// on-device account; mnemonic and raw-key fields are ignored.
     #[serde(default)]
     pub ledger: bool,
+    /// Transport for the Ledger: "usb" (default) or "ble" (Flex/Stax/Nano X).
+    pub ledger_transport: Option<String>,
     /// Empty or absent: public default for the chain.
     pub rpc_url: Option<String>,
     /// Public EOA used for shielding (and for the `direct` transport).
@@ -477,13 +479,26 @@ impl Engine {
         // purely advisory, and one address per wallet is less confusing than one per chain.
         let (signer, keys, derivation): (Arc<dyn RailgunSigner>, Option<keys::RailgunKeys>, &'static str) =
             if p.ledger {
-                let device = railgun_ledger::transport::usb::UsbLedger::init()
-                    .await
-                    .map_err(|e| anyhow!("Ledger: {e} (device plugged in and unlocked?)"))?;
-                let signer =
-                    railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
-                        .await
-                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
+                let transport = p.ledger_transport.as_deref().unwrap_or("usb");
+                let signer: Arc<dyn RailgunSigner> = match transport {
+                    "ble" | "bluetooth" => {
+                        let device = railgun_ledger::BleLedger::connect()
+                            .await
+                            .map_err(|e| anyhow!("Ledger over BLE: {e}"))?;
+                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                            .await
+                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
+                    }
+                    "usb" => {
+                        let device = railgun_ledger::transport::usb::UsbLedger::init()
+                            .await
+                            .map_err(|e| anyhow!("Ledger: {e} (device plugged in and unlocked?)"))?;
+                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                            .await
+                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
+                    }
+                    other => bail!("unknown Ledger transport {other:?} (use \"usb\" or \"ble\")"),
+                };
                 (signer, None, "ledger")
             } else {
                 let (keys, derivation) = match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
