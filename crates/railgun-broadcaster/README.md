@@ -22,8 +22,9 @@ Protocol follows `@railgun-community/waku-broadcaster-client` 9.x and `shared-mo
   of `PAR_RATE_WRAPPED_BASE_TOKEN` bounds any broadcaster without trusting anyone.
 * `client`: `pump()` to keep the cache current, `seal()` with a fresh ephemeral key per request,
   `send()` with the reference retry schedule (republish every 2 s for 20 s, listen up to 120 s).
-* `transport`: the `WakuTransport` trait, `BrowserBridge` (node in a browser tab, js-waku),
-  `NwakuRest` (local nwaku), and an in-memory hub for tests.
+* `transport`: the `WakuTransport` trait, `LightNodeTransport` (native light node, feature
+  `light-node`), `BrowserBridge` (node in a browser tab, js-waku), `NwakuRest` (local nwaku), and
+  an in-memory hub for tests.
 
 What the wallet still does itself, because it owns the `RailgunProvider` and the RPC: gas price,
 dummy-proof gas estimate, `broadcaster_fee` + `min_gas_price` on the builder, proof,
@@ -31,10 +32,27 @@ pre-transaction POIs. See `railgun-wallet/src/engine.rs::submit_legacy`.
 
 ## Waku node
 
-The wallet's default is a js-waku light node in its own tab, through `BrowserBridge`: nothing to
-install. The rest of this section is the alternative.
+### Native light node (feature `light-node`)
 
-There is no mature Waku node in Rust, so the default transport talks to a local
+`LightNodeTransport::for_chain(chain_id)` runs the `waku-light` crate in process: filter v2 to
+receive, light push v3 or v2 to send, metadata, over wss to the Railgun fleet on `:8000`. Nothing
+to install, no browser tab, no JavaScript. It starts on the first call on the caller's tokio
+runtime and stops when dropped. Until a service node holds the filter subscription, `subscribe`
+and `poll` return `TransportError::Remote` with the peer count and the last error, which the
+wallet's fee monitor retries every 3 s.
+
+Passive check against the fleet (prints the authenticated offers, publishes nothing):
+
+```sh
+cargo run --release -p railgun-broadcaster --features light-node --example light_fees -- 11155111 90
+```
+
+### js-waku in a browser tab, local nwaku
+
+`BrowserBridge` hands messages to and from a js-waku node running in the wallet's tab. The rest
+of this section is the nwaku alternative.
+
+The `NwakuRest` transport talks to a local
 [nwaku](https://github.com/waku-org/nwaku) over REST. Start one on the Railgun shard, for example:
 
 ```sh

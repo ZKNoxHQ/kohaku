@@ -129,6 +129,12 @@ impl BroadcasterClient {
         self.transport.peer_count().await
     }
 
+    /// Publish counters of the transport, when it keeps them (see
+    /// [`WakuTransport::publish_stats`]).
+    pub fn publish_stats(&self) -> Option<crate::PublishStats> {
+        self.transport.publish_stats()
+    }
+
     /// Drains the transport once and files what arrived. Call it periodically.
     /// Returns the number of fee announcements accepted.
     pub async fn pump(&self) -> Result<usize, ClientError> {

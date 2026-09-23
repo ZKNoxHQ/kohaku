@@ -41,3 +41,12 @@ signer configured from what a wallet displays would never match. Signers are com
 
 The policy is optional in the crate. Requiring it is the application's call: the wallet requires
 it on mainnet only.
+
+## ADR-006: native light node as a transport, behind a feature
+
+`waku-light` removes the two costs of the earlier options: the user running nwaku (ADR-003) and
+a browser tab that must stay open (`BrowserBridge`). It is a feature so that the crate's default
+build does not pull libp2p for users of `NwakuRest` or the bridge. The adapter maps the node's
+state onto the trait without new error variants: not ready is `Remote`, like the bridge, so the
+wallet's retry loop is unchanged. Publishing waits for the light push answers, which gives the
+caller a definite outcome; the bridge could only report it at the next exchange.

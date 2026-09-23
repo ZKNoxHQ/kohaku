@@ -175,4 +175,8 @@ impl WakuTransport for BrowserBridge {
     async fn peer_count(&self) -> Option<usize> {
         Some(self.state.lock().unwrap().remote.peers)
     }
+
+    fn publish_stats(&self) -> Option<PublishStats> {
+        Some(BrowserBridge::publish_stats(self))
+    }
 }
