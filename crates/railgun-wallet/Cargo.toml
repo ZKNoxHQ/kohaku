@@ -23,6 +23,7 @@ hmac = "0.12"
 kohaku-db = { workspace = true }
 railgun = { workspace = true }
 railgun-broadcaster = { path = "../railgun-broadcaster" }
+railgun-ledger = { workspace = true, features = ["usb"] }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

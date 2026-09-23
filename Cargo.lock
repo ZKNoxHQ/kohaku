@@ -5055,11 +5055,15 @@ dependencies = [
 name = "railgun-ledger"
 version = "0.1.0"
 dependencies = [
+ "ark-bn254",
+ "ark-ff 0.6.0",
  "async-trait",
  "cfg_aliases",
  "coins-ledger",
  "common",
+ "crypto",
  "hex",
+ "num-bigint",
  "railgun",
  "ruint",
  "thiserror 2.0.20",
@@ -5108,6 +5112,7 @@ dependencies = [
  "kohaku-db",
  "railgun",
  "railgun-broadcaster",
+ "railgun-ledger",
  "rand 0.10.3",
  "reqwest",
  "serde",

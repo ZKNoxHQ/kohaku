@@ -33,6 +33,15 @@ pub struct TransportError(pub String);
 #[cfg_attr(wasm, async_trait::async_trait(?Send))]
 pub trait Exchange: MaybeSend {
     async fn exchange(&self, apdu: &Apdu) -> Result<ApduResponse, TransportError>;
+
+    /// Re-establish the channel after it went stale. A Ledger re-enumerates on USB whenever
+    /// an app is opened or closed (and on lock), which invalidates any open handle; callers
+    /// retry a failed exchange once after a successful reconnect.
+    async fn reconnect(&self) -> Result<(), TransportError> {
+        Err(TransportError(
+            "transport does not support reconnection".into(),
+        ))
+    }
 }
 
 /// USB HID transport over `coins-ledger`.
@@ -46,14 +55,17 @@ pub mod usb {
     use super::{Apdu, ApduResponse, Exchange, TransportError};
 
     /// A USB-connected Ledger. [`UsbLedger::init`] picks the first device found.
-    pub struct UsbLedger(Ledger);
+    ///
+    /// The handle sits behind a mutex so [`Exchange::reconnect`] can replace it in place:
+    /// a Ledger re-enumerates on USB whenever an app opens or closes, killing old handles.
+    pub struct UsbLedger(tokio::sync::Mutex<Ledger>);
 
     impl UsbLedger {
         pub async fn init() -> Result<Self, TransportError> {
             let ledger = Ledger::init()
                 .await
                 .map_err(|e| TransportError(e.to_string()))?;
-            Ok(Self(ledger))
+            Ok(Self(tokio::sync::Mutex::new(ledger)))
         }
     }
 
@@ -70,6 +82,8 @@ pub mod usb {
             };
             let answer = self
                 .0
+                .lock()
+                .await
                 .exchange(&command)
                 .await
                 .map_err(|e| TransportError(e.to_string()))?;
@@ -77,6 +91,14 @@ pub mod usb {
                 status: answer.retcode(),
                 data: answer.data().unwrap_or_default().to_vec(),
             })
+        }
+
+        async fn reconnect(&self) -> Result<(), TransportError> {
+            let fresh = Ledger::init()
+                .await
+                .map_err(|e| TransportError(e.to_string()))?;
+            *self.0.lock().await = fresh;
+            Ok(())
         }
     }
 }

@@ -184,6 +184,11 @@ pub struct UnlockParams {
     #[serde(default)]
     pub index: u32,
     pub chain_id: u64,
+    /// Sign with a Ledger device running the ZKNOX Railgun app: the spending key never
+    /// leaves the device, the viewing key is exported once at unlock. `index` selects the
+    /// on-device account; mnemonic and raw-key fields are ignored.
+    #[serde(default)]
+    pub ledger: bool,
     /// Empty or absent: public default for the chain.
     pub rpc_url: Option<String>,
     /// Public EOA used for shielding (and for the `direct` transport).
@@ -286,7 +291,7 @@ struct Session {
     provider: DynProvider,
     eoa: Option<EoaSigner>,
     eoa_source: Option<String>,
-    signer: Arc<RgSigner>,
+    signer: Arc<dyn RailgunSigner>,
     railgun: RailgunProvider,
     derivation: &'static str,
     bundler_url: String,
@@ -468,25 +473,42 @@ impl Engine {
         let chain = ChainConfig::from_chain_id(p.chain_id)
             .ok_or_else(|| anyhow!("unsupported chain id {}", p.chain_id))?;
 
-        let (keys, derivation) = match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
-            (Some(m), _, _) if !m.trim().is_empty() => (
-                keys::derive(m, p.index, p.derivation)?,
-                match p.derivation {
-                    Derivation::Railgun => "railgun",
-                    Derivation::Kohaku => "kohaku",
-                },
-            ),
-            (_, Some(s), Some(v)) => (keys::from_hex(s, v)?, "raw"),
-            _ => bail!("provide either a mnemonic or both spending and viewing keys"),
-        };
         // Chain-agnostic address, as Railway displays it: the chain field of a 0zk address is
         // purely advisory, and one address per wallet is less confusing than one per chain.
-        let signer = RgSigner::new(keys.spending, keys.viewing, RgChainId::All);
+        let (signer, keys, derivation): (Arc<dyn RailgunSigner>, Option<keys::RailgunKeys>, &'static str) =
+            if p.ledger {
+                let device = railgun_ledger::transport::usb::UsbLedger::init()
+                    .await
+                    .map_err(|e| anyhow!("Ledger: {e} (device plugged in and unlocked?)"))?;
+                let signer =
+                    railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                        .await
+                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
+                (signer, None, "ledger")
+            } else {
+                let (keys, derivation) = match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
+                    (Some(m), _, _) if !m.trim().is_empty() => (
+                        keys::derive(m, p.index, p.derivation)?,
+                        match p.derivation {
+                            Derivation::Railgun => "railgun",
+                            Derivation::Kohaku => "kohaku",
+                        },
+                    ),
+                    (_, Some(s), Some(v)) => (keys::from_hex(s, v)?, "raw"),
+                    _ => bail!(
+                        "provide a mnemonic, both spending and viewing keys, or a Ledger device"
+                    ),
+                };
+                let signer = RgSigner::new(keys.spending, keys.viewing, RgChainId::All);
+                (signer, Some(keys), derivation)
+            };
         let address = signer.address().to_string();
 
         // Public account: an explicit key wins; otherwise the Ethereum account of the same
-        // phrase, at the same index, as every mnemonic wallet derives it.
-        let (eoa, eoa_source) = match (p.eoa_key.as_deref().map(str::trim), &p.mnemonic) {
+        // phrase, at the same index, as every mnemonic wallet derives it. A Ledger unlock has
+        // no phrase: only an explicit key provides one.
+        let mnemonic = if p.ledger { &None } else { &p.mnemonic };
+        let (eoa, eoa_source) = match (p.eoa_key.as_deref().map(str::trim), mnemonic) {
             (Some(k), _) if !k.is_empty() => (
                 Some(EoaSigner::from_str(k).map_err(|e| anyhow!("invalid EOA key: {e}"))?),
                 Some("imported key".to_string()),
@@ -546,15 +568,22 @@ impl Engine {
 
         // Directories from before this scheme were keyed by the chain-specific address; rename
         // so existing wallets keep their synced state instead of resyncing from scratch.
-        let legacy_address =
-            RailgunAddress::from_private_keys(keys.spending, keys.viewing, RgChainId::evm(chain.id))
-                .to_string();
-        let legacy_dir = chain_dir.join(hex::encode(&Sha256::digest(legacy_address.as_bytes())[..8]));
-        if legacy_dir.is_dir() && !data_dir.exists() {
-            std::fs::rename(&legacy_dir, &data_dir).with_context(|| {
-                format!("migrating {} to {}", legacy_dir.display(), data_dir.display())
-            })?;
-            info!(from = %legacy_dir.display(), to = %data_dir.display(), "wallet directory migrated");
+        // Ledger wallets postdate the scheme: nothing to migrate.
+        if let Some(keys) = &keys {
+            let legacy_address = RailgunAddress::from_private_keys(
+                keys.spending,
+                keys.viewing,
+                RgChainId::evm(chain.id),
+            )
+            .to_string();
+            let legacy_dir =
+                chain_dir.join(hex::encode(&Sha256::digest(legacy_address.as_bytes())[..8]));
+            if legacy_dir.is_dir() && !data_dir.exists() {
+                std::fs::rename(&legacy_dir, &data_dir).with_context(|| {
+                    format!("migrating {} to {}", legacy_dir.display(), data_dir.display())
+                })?;
+                info!(from = %legacy_dir.display(), to = %data_dir.display(), "wallet directory migrated");
+            }
         }
         let db = // v2: accounts keep spent and sent notes, the txid indexer keeps our own operations.
         // A v1 database dropped them at sync time, so it cannot be upgraded in place.

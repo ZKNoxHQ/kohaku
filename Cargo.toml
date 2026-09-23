@@ -60,6 +60,7 @@ num-bigint = "0.4.6"
 num-traits = "0.2.19"
 poseidon-rust = { path = "./crates/poseidon-rust" }
 railgun = { path = "./crates/railgun" }
+railgun-ledger = { path = "./crates/railgun-ledger" }
 rand = "0.10"
 rand_chacha = "0.10"
 rayon = "1.12"

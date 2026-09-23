@@ -15,8 +15,8 @@ use railgun::{
 use railgun_ledger::{
     Apdu, ApduResponse, Exchange, LedgerSigner, TransportError,
     protocol::{
-        CLA, INS_EXPORT_VIEWING_KEY, INS_GET_SPENDING_PUBLIC_KEY, INS_GET_VERSION, INS_SIGN_HASH,
-        spending_path, viewing_path,
+        CLA, INS_BLIND_SIGN, INS_GET_VERSION, INS_RAILGUN_ADDRESS, INS_SPENDING_PUBKEY,
+        INS_VIEWING_PRIVKEY, INS_VIEWING_PUBKEY, P1_CURVE_BABYJUBJUB, P1_DISPLAY,
     },
 };
 
@@ -30,6 +30,8 @@ struct MockDevice {
     spending: SpendingKey,
     viewing: ViewingKey,
     deny_signing: bool,
+    corrupt_viewing_export: bool,
+    sign_with_wrong_key: bool,
 }
 
 impl MockDevice {
@@ -38,16 +40,11 @@ impl MockDevice {
             spending: SpendingKey::from_hex(SPENDING_HEX).unwrap(),
             viewing: ViewingKey::from_hex(VIEWING_HEX).unwrap(),
             deny_signing: false,
+            corrupt_viewing_export: false,
+            sign_with_wrong_key: false,
         }
     }
 
-    fn expected_path(path: &[u32; 5]) -> Vec<u8> {
-        let mut out = vec![5u8];
-        for c in path {
-            out.extend_from_slice(&c.to_be_bytes());
-        }
-        out
-    }
 }
 
 #[async_trait]
@@ -62,29 +59,61 @@ impl Exchange for MockDevice {
                 assert!(apdu.data.is_empty());
                 ok(vec![0, 1, 0])
             }
-            INS_GET_SPENDING_PUBLIC_KEY => {
-                assert_eq!(apdu.data, Self::expected_path(&spending_path(ACCOUNT_INDEX)));
+            INS_SPENDING_PUBKEY => {
+                // The silent form is debug-only in the app: the host must display.
+                assert_eq!(apdu.p1, P1_DISPLAY);
+                assert_eq!(apdu.data, ACCOUNT_INDEX.to_be_bytes());
                 let pubkey = self.spending.public_key();
                 let mut data = pubkey.x_u256().to_be_bytes::<32>().to_vec();
                 data.extend_from_slice(&pubkey.y_u256().to_be_bytes::<32>());
                 ok(data)
             }
-            INS_EXPORT_VIEWING_KEY => {
-                assert_eq!(apdu.data, Self::expected_path(&viewing_path(ACCOUNT_INDEX)));
-                ok(hex::decode(self.viewing.to_hex()).unwrap())
+            INS_VIEWING_PUBKEY => {
+                // Production firmware requires display-and-confirm here too.
+                assert_eq!(apdu.p1, P1_DISPLAY);
+                assert_eq!(apdu.data, ACCOUNT_INDEX.to_be_bytes());
+                ok(hex::decode(self.viewing.public_key().to_hex()).unwrap())
             }
-            INS_SIGN_HASH => {
+            INS_VIEWING_PRIVKEY => {
+                assert_eq!(apdu.p1, 0);
+                assert_eq!(apdu.data, ACCOUNT_INDEX.to_be_bytes());
+                let mut seed = hex::decode(self.viewing.to_hex()).unwrap();
+                if self.corrupt_viewing_export {
+                    seed[0] ^= 0xFF;
+                }
+                ok(seed)
+            }
+            INS_BLIND_SIGN => {
+                assert_eq!(apdu.p1, P1_CURVE_BABYJUBJUB);
                 if self.deny_signing {
                     return Ok(ApduResponse { data: Vec::new(), status: 0x6985 });
                 }
-                let expected_path = Self::expected_path(&spending_path(ACCOUNT_INDEX));
-                assert_eq!(&apdu.data[..expected_path.len()], expected_path);
-                let hash = U256::from_be_slice(&apdu.data[expected_path.len()..]);
-                let signature = self.spending.sign(hash);
-                let mut data = signature.r8_x.to_be_bytes::<32>().to_vec();
+                assert_eq!(apdu.data.len(), 36);
+                assert_eq!(&apdu.data[..4], ACCOUNT_INDEX.to_be_bytes());
+                // The wire message is little-endian, as the real firmware consumes it.
+                let hash = U256::from_le_slice(&apdu.data[4..]);
+                let key = if self.sign_with_wrong_key {
+                    SpendingKey::from_hex(&hex::encode([7u8; 32])).unwrap()
+                } else {
+                    self.spending
+                };
+                let signature = key.sign(hash);
+                // Firmware layout: sigLen(1) || R8x || R8y || S || echoed msg_hash(32).
+                let mut data = vec![96u8];
+                data.extend_from_slice(&signature.r8_x.to_be_bytes::<32>());
                 data.extend_from_slice(&signature.r8_y.to_be_bytes::<32>());
                 data.extend_from_slice(&signature.s.to_be_bytes::<32>());
+                data.extend_from_slice(&apdu.data[4..]);
                 ok(data)
+            }
+            INS_RAILGUN_ADDRESS => {
+                assert_eq!(apdu.p1, P1_DISPLAY);
+                assert_eq!(apdu.data, ACCOUNT_INDEX.to_be_bytes());
+                let address = PrivateKeySigner::new(self.spending, self.viewing, ChainId::All)
+                    .address()
+                    .to_string();
+                assert_eq!(address.len(), 127);
+                ok(address.into_bytes())
             }
             ins => panic!("unexpected instruction {ins:#04x}"),
         }
@@ -109,6 +138,10 @@ async fn ledger_signer_matches_software_signer() {
     // Same address, hence same master and viewing public keys.
     assert_eq!(ledger.address(), software.address());
 
+    // The device's displayed 0zk string matches the host derivation.
+    let shown = ledger.verify_address_on_device().await.unwrap();
+    assert_eq!(shown, software.address().to_string());
+
     // Deterministic EdDSA: the signature through the APDU layer is bit-identical.
     let message = U256::from(42u64);
     let from_device = ledger.sign(message).await.unwrap();
@@ -128,4 +161,27 @@ async fn user_denial_is_an_error_not_a_panic() {
 
     let err = ledger.sign(U256::from(1u64)).await.unwrap_err();
     assert!(err.to_string().contains("denied by user"), "got: {err}");
+}
+
+#[tokio::test]
+async fn wrong_key_signature_is_rejected() {
+    let mut device = MockDevice::new();
+    device.sign_with_wrong_key = true;
+    let ledger = LedgerSigner::connect(device, ChainId::All, ACCOUNT_INDEX)
+        .await
+        .unwrap();
+
+    let err = ledger.sign(U256::from(1u64)).await.unwrap_err();
+    assert!(err.to_string().contains("does not verify"), "got: {err}");
+}
+
+#[tokio::test]
+async fn corrupted_viewing_export_is_rejected_at_connect() {
+    let mut device = MockDevice::new();
+    device.corrupt_viewing_export = true;
+
+    let Err(err) = LedgerSigner::connect(device, ChainId::All, ACCOUNT_INDEX).await else {
+        panic!("corrupted seed export must not connect");
+    };
+    assert!(err.to_string().contains("does not match"), "got: {err}");
 }

@@ -153,11 +153,20 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
       </div>
     </div>
 
+    <label for="f-source">Keys</label>
+    <select id="f-source">
+      <option value="phrase">Recovery phrase (software keys)</option>
+      <option value="ledger">Ledger device (ZKNOX Railgun app)</option>
+    </select>
+    <p class="hint" id="ledger-hint" hidden>The spending key stays on the device: opening the wallet asks for three confirmations on it (spending key, viewing key, viewing pubkey), and every transfer or unshield is a blind-sign review. Plug the device in, unlock it and open the RAILGUN app before continuing.</p>
+
+    <div id="wrap-phrase">
     <label for="f-mnemonic">Recovery phrase</label>
     <textarea id="f-mnemonic" autocomplete="off" spellcheck="false"></textarea>
     <p class="hint">Prefilled with the public test phrase (“yellow” twelve times). Anyone can spend from it: test networks only.</p>
+    </div>
     <div class="row">
-      <div>
+      <div id="wrap-derivation">
         <label for="f-derivation">Key derivation</label>
         <select id="f-derivation">
           <option value="railgun">Railgun (same address as Railway)</option>
@@ -169,7 +178,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
         <input type="number" id="f-index" min="0" value="0">
       </div>
     </div>
-    <details>
+    <details id="wrap-rawkeys">
       <summary>Use raw spending and viewing keys instead</summary>
       <div class="row">
         <div><label for="f-spend">Spending key (hex)</label><input type="password" id="f-spend" autocomplete="off"></div>
@@ -622,16 +631,29 @@ async function submitOp(body) {
   try { await api("/api/op", body); await poll(); } catch (e) { banner(e.message); }
 }
 
+$("f-source").addEventListener("change", () => {
+  const ledger = $("f-source").value === "ledger";
+  $("wrap-phrase").hidden = ledger;
+  $("wrap-derivation").hidden = ledger;
+  $("wrap-rawkeys").hidden = ledger;
+  $("ledger-hint").hidden = !ledger;
+});
+
 $("btn-unlock").addEventListener("click", async () => {
   savePrefs();
+  const ledger = $("f-source").value === "ledger";
   const btn = $("btn-unlock"); btn.disabled = true;
-  $("unlock-msg").textContent = "Opening: loading the local database and registering the keys…";
+  $("unlock-msg").textContent = ledger
+    ? "Opening: confirm the three prompts on the Ledger (spending key, viewing key, viewing pubkey)…"
+    : "Opening: loading the local database and registering the keys…";
   banner("");
   try {
     await api("/api/unlock", {
       chainId: Number($("f-chain").value), rpcUrl: $("f-rpc").value.trim(),
-      mnemonic: $("f-mnemonic").value.trim() || null,
-      spendingKey: $("f-spend").value.trim() || null, viewingKey: $("f-view").value.trim() || null,
+      ledger,
+      mnemonic: ledger ? null : ($("f-mnemonic").value.trim() || null),
+      spendingKey: ledger ? null : ($("f-spend").value.trim() || null),
+      viewingKey: ledger ? null : ($("f-view").value.trim() || null),
       derivation: $("f-derivation").value, index: Number($("f-index").value || 0),
       eoaKey: $("f-eoa").value.trim() || null, poi: $("f-poi").checked,
       bundlerUrl: $("f-bundler").value.trim() || null,

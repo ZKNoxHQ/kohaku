@@ -1,25 +1,33 @@
 //! The APDU protocol of the ZKNOX Railgun Ledger app.
 //!
-//! This module is the single source of truth for the host side of the wire format; the
-//! device app must mirror it exactly.
+//! This module is the single source of truth for the host side of the wire format; it
+//! mirrors the app's instruction table. Every instruction addresses an account by a 4-byte
+//! big-endian index; the derivation paths are pinned in the firmware:
+//! `m/44'/1984'/account'/0'/0'` for the BabyJubJub spending key and
+//! `m/420'/1984'/account'/0'/0'` for the ed25519 viewing key. Note the account sits at the
+//! third component, unlike the Railgun engine's `m/44'/1984'/0'/0'/index'`: account 0
+//! coincides with the engine's index 0, accounts >= 1 are a different key space.
 //!
-//! ## Commands
+//! ## Instructions used by this host
 //!
-//! All commands use class byte [`CLA`]. Paths are serialized in the standard Ledger form:
-//! one byte component count, then each component as a big-endian `u32` (hardened components
-//! have the high bit set).
+//! | INS | Name | P1 | Data | Response on approve |
+//! |-----|------|----|------|---------------------|
+//! | `0x01` | SPENDING_PUBKEY | `0x01` (display; silent is debug-only) | account(4 BE) | 64 bytes: BabyJubJub X ‖ Y, 32-byte big-endian each |
+//! | `0x03` | GET_VERSION | 0 | empty | 3 bytes: major, minor, patch |
+//! | `0x04` | GET_APP_NAME | 0 | empty | ASCII app name |
+//! | `0x10` | VIEWING_PUBKEY | `0x01` (display; prod requires it) | account(4 BE) | 32 bytes: ed25519 public key, RFC 8032 compressed |
+//! | `0x12` | BLIND_SIGN | curve: `0x00` BabyJubJub (default), `0x01` Bandersnatch, `0x02` BabyJubJub | account(4 BE) ‖ msg(32, **little-endian**: circomlib's leInt2Buff convention) | 129 bytes: sigLen(1, = 96) ‖ R8x ‖ R8y ‖ S (32 B big-endian each) ‖ echoed msg(32); the echo is checked against what was sent |
+//! | `0x13` | VIEWING_PRIVKEY | 0 | account(4 BE) | 32 bytes: the ed25519 viewing private key; user approval on device |
+//! | `0x14` | RAILGUN_ADDRESS | `0x01` | account(4 BE) | 127 ASCII bytes: the `0zk1…` string, not NUL-terminated; user approval on device |
 //!
-//! | INS | P1 | Data | Response |
-//! |-----|----|------|----------|
-//! | [`INS_GET_VERSION`] | 0 | empty | 3 bytes: major, minor, patch |
-//! | [`INS_GET_SPENDING_PUBLIC_KEY`] | 0 silent, 1 display | path | 64 bytes: BabyJubJub A.x ‖ A.y, 32-byte big-endian each, uncompressed |
-//! | [`INS_EXPORT_VIEWING_KEY`] | 0 silent, 1 display | path | 32 bytes: the raw ed25519 **seed** (not an expanded scalar) |
-//! | [`INS_SIGN_HASH`] | 0 | path ‖ 32-byte big-endian BN254 field element | 96 bytes: R8.x ‖ R8.y ‖ s, 32-byte big-endian each |
+//! Instructions the host does not use yet: `0x07`/`0x08`/`0x09` (secp256k1 7702 sub-tree
+//! and one-shot tx-hash signing), `0x11` CLEAR_SIGN (the stateful review session — the
+//! upgrade path from blind signing).
 //!
-//! The signed message is the already-poseidon-hashed transaction digest
+//! For BLIND_SIGN the message is the already-poseidon-hashed transaction digest
 //! (`poseidon(merkleroot, boundParamsHash, nullifiers…, commitments…)`), computed host-side.
-//! The signature must verify under circomlib's `EdDSAPoseidonVerifier`, i.e. match
-//! the deterministic Poseidon-EdDSA of the reference software implementation.
+//! The signature must verify under circomlib's `EdDSAPoseidonVerifier`, i.e. match the
+//! deterministic Poseidon-EdDSA of the reference software implementation.
 
 use ruint::aliases::U256;
 use thiserror::Error;
@@ -30,17 +38,22 @@ use crate::transport::{Apdu, Exchange, TransportError};
 
 pub const CLA: u8 = 0xE0;
 
-pub const INS_GET_VERSION: u8 = 0x01;
-pub const INS_GET_SPENDING_PUBLIC_KEY: u8 = 0x02;
-pub const INS_EXPORT_VIEWING_KEY: u8 = 0x04;
-pub const INS_SIGN_HASH: u8 = 0x06;
+pub const INS_SPENDING_PUBKEY: u8 = 0x01;
+pub const INS_GET_VERSION: u8 = 0x03;
+pub const INS_GET_APP_NAME: u8 = 0x04;
+pub const INS_VIEWING_PUBKEY: u8 = 0x10;
+pub const INS_BLIND_SIGN: u8 = 0x12;
+pub const INS_VIEWING_PRIVKEY: u8 = 0x13;
+pub const INS_RAILGUN_ADDRESS: u8 = 0x14;
 
-/// Show the requested material on the device screen for user verification.
+/// Display-and-confirm on the device. Required in production for the pubkey and address
+/// instructions; the silent form (`0x00`) is debug-only firmware.
 pub const P1_DISPLAY: u8 = 0x01;
 
-pub const STATUS_OK: u16 = 0x9000;
+/// BLIND_SIGN curve selector: BabyJubJub, the default.
+pub const P1_CURVE_BABYJUBJUB: u8 = 0x00;
 
-const HARDENED: u32 = 0x8000_0000;
+pub const STATUS_OK: u16 = 0x9000;
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -52,6 +65,10 @@ pub enum ProtocolError {
     ResponseLength { expected: usize, got: usize },
     #[error("invalid key material in response: {0}")]
     Key(String),
+    #[error("viewing key export does not match the device's viewing public key")]
+    ViewingKeyMismatch,
+    #[error("device signed a different message than requested")]
+    SignedHashMismatch,
 }
 
 fn status_name(status: u16) -> &'static str {
@@ -66,46 +83,13 @@ fn status_name(status: u16) -> &'static str {
     }
 }
 
-/// BIP-32 path of the Railgun spending key, all components hardened:
-/// `m/44'/1984'/0'/0'/index'`, as in the Railgun engine.
-pub fn spending_path(index: u32) -> [u32; 5] {
-    [
-        44 | HARDENED,
-        1984 | HARDENED,
-        HARDENED,
-        HARDENED,
-        index | HARDENED,
-    ]
-}
-
-/// BIP-32 path of the Railgun viewing key, all components hardened:
-/// `m/420'/1984'/0'/0'/index'`, as in the Railgun engine.
-pub fn viewing_path(index: u32) -> [u32; 5] {
-    [
-        420 | HARDENED,
-        1984 | HARDENED,
-        HARDENED,
-        HARDENED,
-        index | HARDENED,
-    ]
-}
-
-/// Standard Ledger path framing: count byte, then big-endian `u32` components.
-fn serialize_path(path: &[u32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + 4 * path.len());
-    out.push(path.len() as u8);
-    for component in path {
-        out.extend_from_slice(&component.to_be_bytes());
-    }
-    out
-}
-
+/// One APDU round-trip; checks the status word, and the payload length when expected.
 async fn call<E: Exchange>(
     device: &E,
     ins: u8,
     p1: u8,
     data: Vec<u8>,
-    expected_len: usize,
+    expected_len: Option<usize>,
 ) -> Result<Vec<u8>, ProtocolError> {
     let response = device
         .exchange(&Apdu {
@@ -121,9 +105,11 @@ async fn call<E: Exchange>(
             status: response.status,
         });
     }
-    if response.data.len() != expected_len {
+    if let Some(expected) = expected_len
+        && response.data.len() != expected
+    {
         return Err(ProtocolError::ResponseLength {
-            expected: expected_len,
+            expected,
             got: response.data.len(),
         });
     }
@@ -132,54 +118,101 @@ async fn call<E: Exchange>(
 
 /// The app version, `(major, minor, patch)`.
 pub async fn get_version<E: Exchange>(device: &E) -> Result<(u8, u8, u8), ProtocolError> {
-    let data = call(device, INS_GET_VERSION, 0, Vec::new(), 3).await?;
+    let data = call(device, INS_GET_VERSION, 0, Vec::new(), Some(3)).await?;
     Ok((data[0], data[1], data[2]))
 }
 
-/// The BabyJubJub spending public key at `m/44'/1984'/0'/0'/index'`.
+/// The app name, for a wrong-app check before anything sensitive.
+pub async fn get_app_name<E: Exchange>(device: &E) -> Result<String, ProtocolError> {
+    let data = call(device, INS_GET_APP_NAME, 0, Vec::new(), None).await?;
+    Ok(String::from_utf8_lossy(&data).into_owned())
+}
+
+/// SPENDING_PUBKEY: the BabyJubJub spending public key of the account, reviewed and
+/// approved on the device (production firmware requires the display form).
 pub async fn get_spending_public_key<E: Exchange>(
     device: &E,
-    index: u32,
-    display: bool,
+    account: u32,
 ) -> Result<SpendingPublicKey, ProtocolError> {
-    let p1 = if display { P1_DISPLAY } else { 0 };
-    let path = serialize_path(&spending_path(index));
-    let data = call(device, INS_GET_SPENDING_PUBLIC_KEY, p1, path, 64).await?;
+    let data = account.to_be_bytes().to_vec();
+    let data = call(device, INS_SPENDING_PUBKEY, P1_DISPLAY, data, Some(64)).await?;
 
     let x: [u8; 32] = data[..32].try_into().expect("length checked");
     let y: [u8; 32] = data[32..].try_into().expect("length checked");
     Ok(SpendingPublicKey::new(x, y))
 }
 
-/// The ed25519 viewing seed at `m/420'/1984'/0'/0'/index'`.
+/// VIEWING_PUBKEY: the ed25519 viewing public key of the account, reviewed and approved on
+/// the device (production firmware requires the display form).
+pub async fn get_viewing_public_key<E: Exchange>(
+    device: &E,
+    account: u32,
+) -> Result<[u8; 32], ProtocolError> {
+    let data = account.to_be_bytes().to_vec();
+    let data = call(device, INS_VIEWING_PUBKEY, P1_DISPLAY, data, Some(32)).await?;
+    Ok(data.try_into().expect("length checked"))
+}
+
+/// VIEWING_PRIVKEY: export the ed25519 viewing private key of the account. Mandatory user
+/// approval on the device.
 ///
-/// This must be the raw 32-byte seed: the host uses it as an ed25519 seed for the viewing
-/// public key, hashed-and-clamped for note-decryption ECDH, and as the poseidon preimage of
-/// the nullifying key.
+/// The host requires the raw 32-byte seed: it is used as an ed25519 seed for the viewing
+/// public key, hashed-and-clamped for note-decryption ECDH, and as the poseidon preimage
+/// of the nullifying key. An export with other semantics (e.g. the clamped scalar) fails
+/// the cross-check against VIEWING_PUBKEY at connect.
 pub async fn export_viewing_key<E: Exchange>(
     device: &E,
-    index: u32,
+    account: u32,
 ) -> Result<ViewingKey, ProtocolError> {
-    let data = call(device, INS_EXPORT_VIEWING_KEY, 0, serialize_path(&viewing_path(index)), 32)
-        .await?;
+    let data = account.to_be_bytes().to_vec();
+    let data = call(device, INS_VIEWING_PRIVKEY, 0, data, Some(32)).await?;
     ViewingKey::from_hex(&hex::encode(&data)).map_err(|e| ProtocolError::Key(e.to_string()))
 }
 
-/// Poseidon-EdDSA signature over an already-hashed BN254 field element.
+/// BLIND_SIGN: Poseidon-EdDSA over BabyJubJub on an already-hashed message.
 ///
-/// One call is one user confirmation on the device.
+/// One call is one blind-signing review on the device, showing the account index and the
+/// message hash. The response echoes the signed hash, which is checked against the request.
 pub async fn sign_hash<E: Exchange>(
     device: &E,
-    index: u32,
+    account: u32,
     hash: U256,
 ) -> Result<SpendingSignature, ProtocolError> {
-    let mut data = serialize_path(&spending_path(index));
-    data.extend_from_slice(&hash.to_be_bytes::<32>());
-    let response = call(device, INS_SIGN_HASH, 0, data, 96).await?;
+    // The wire message is little-endian: the firmware mirrors circomlib's signPoseidon,
+    // which serializes the message with leInt2Buff (nonce over the raw LE bytes, challenge
+    // over the byte-reversed value).
+    let hash_bytes = hash.to_le_bytes::<32>();
+    let mut data = account.to_be_bytes().to_vec();
+    data.extend_from_slice(&hash_bytes);
+    let response = call(device, INS_BLIND_SIGN, P1_CURVE_BABYJUBJUB, data, Some(129)).await?;
+
+    if response[0] != 96 {
+        return Err(ProtocolError::Key(format!(
+            "unexpected signature length marker {}",
+            response[0]
+        )));
+    }
+    if response[97..129] != hash_bytes {
+        return Err(ProtocolError::SignedHashMismatch);
+    }
 
     Ok(SpendingSignature {
-        r8_x: U256::from_be_slice(&response[..32]),
-        r8_y: U256::from_be_slice(&response[32..64]),
-        s: U256::from_be_slice(&response[64..]),
+        r8_x: U256::from_be_slice(&response[1..33]),
+        r8_y: U256::from_be_slice(&response[33..65]),
+        s: U256::from_be_slice(&response[65..97]),
     })
+}
+
+/// RAILGUN_ADDRESS: the canonical `0zk1…` string of the account, reviewed and approved on
+/// the trusted screen — the strong form of address verification.
+///
+/// The device derives both keys itself and bech32m-encodes on device; the response is the
+/// 127 ASCII bytes of the all-chains address.
+pub async fn get_railgun_address<E: Exchange>(
+    device: &E,
+    account: u32,
+) -> Result<String, ProtocolError> {
+    let data = account.to_be_bytes().to_vec();
+    let response = call(device, INS_RAILGUN_ADDRESS, P1_DISPLAY, data, Some(127)).await?;
+    Ok(String::from_utf8_lossy(&response).into_owned())
 }

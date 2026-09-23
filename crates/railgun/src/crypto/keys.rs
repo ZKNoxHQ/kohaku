@@ -207,6 +207,44 @@ impl SpendingPublicKey {
         Self { x, y }
     }
 
+    /// Verifies a circomlib EdDSA-Poseidon signature over `message`:
+    /// `s·B8 == R8 + 8·hm·A` with `hm = poseidon(R8.x, R8.y, A.x, A.y, message)`.
+    ///
+    /// This is the equation the transact circuit enforces, so a signature accepted here is
+    /// exactly a signature the proof will accept. Used to authenticate hardware signers: a
+    /// signature from the wrong device or account fails regardless of transport behavior.
+    pub fn verify(&self, message: U256, signature: &SpendingSignature) -> bool {
+        use num_bigint::{BigInt, Sign};
+        let big = |u: U256| BigInt::from_bytes_be(Sign::Plus, &u.to_be_bytes::<32>());
+        let fr = |u: U256| Fr::from_be_bytes_mod_order(&u.to_be_bytes::<32>());
+
+        let Ok(hm) = poseidon_hash(&[
+            signature.r8_x,
+            signature.r8_y,
+            self.x_u256(),
+            self.y_u256(),
+            message,
+        ]) else {
+            return false;
+        };
+
+        let a = crypto::babyjubjub::Point {
+            x: fr(self.x_u256()),
+            y: fr(self.y_u256()),
+        };
+        let r8 = crypto::babyjubjub::Point {
+            x: fr(signature.r8_x),
+            y: fr(signature.r8_y),
+        };
+
+        let left = crypto::babyjubjub::b8().mul_scalar(&big(signature.s));
+        let right = r8
+            .projective()
+            .add(&a.mul_scalar(&(big(hm) * 8)).projective())
+            .affine();
+        left.x == right.x && left.y == right.y
+    }
+
     pub fn x_hex(&self) -> String {
         hex::encode(self.x)
     }

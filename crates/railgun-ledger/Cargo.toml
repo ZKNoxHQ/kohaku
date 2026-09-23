@@ -7,7 +7,7 @@ edition = "2024"
 default = []
 # Native USB HID transport via coins-ledger. Off by default so workspace builds
 # do not require system HID libraries (libudev headers on Linux).
-usb = ["dep:coins-ledger"]
+usb = ["dep:coins-ledger", "dep:tokio"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -19,9 +19,18 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 coins-ledger = { version = "0.13", optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 [build-dependencies]
 cfg_aliases = { workspace = true }
 
 [dev-dependencies]
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+crypto = { workspace = true }
+num-bigint = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[[example]]
+name = "smoke"
+required-features = ["usb"]
