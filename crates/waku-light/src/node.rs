@@ -6,7 +6,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use futures::StreamExt;
@@ -27,11 +27,12 @@ use libp2p::{
     },
     tcp, websocket, yamux,
 };
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 use crate::{
     Config, Error, Message, PublishReport, Status, filter,
+    rt::{self, Instant, Interval, SystemTime, Task, UNIX_EPOCH},
     hash::{SeenSet, message_hash},
     lightpush::{self, PushError, Version},
     metadata,
@@ -122,7 +123,7 @@ pub struct LightNode {
     inner: Arc<Inner>,
     control: libp2p_stream::Control,
     local_peer_id: PeerId,
-    tasks: Vec<JoinHandle<()>>,
+    tasks: Vec<Task>,
 }
 
 impl Drop for LightNode {
@@ -249,10 +250,10 @@ impl LightNode {
         info!(peer = %local_peer_id, "waku light node starting");
 
         let tasks = vec![
-            tokio::spawn(run_swarm(swarm, inner.clone(), bootstrap)),
-            tokio::spawn(run_pushes(inner.clone(), pushes)),
-            tokio::spawn(run_metadata(inner.clone(), metadata_queries)),
-            tokio::spawn(run_upkeep(inner.clone(), control.clone())),
+            rt::spawn(run_swarm(swarm, inner.clone(), bootstrap)),
+            rt::spawn(run_pushes(inner.clone(), pushes)),
+            rt::spawn(run_metadata(inner.clone(), metadata_queries)),
+            rt::spawn(run_upkeep(inner.clone(), control.clone())),
         ];
         Ok(Self { inner, control, local_peer_id, tasks })
     }
@@ -321,7 +322,7 @@ impl LightNode {
             if Instant::now() >= deadline {
                 return false;
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            rt::sleep(Duration::from_millis(200)).await;
         }
     }
 
@@ -408,7 +409,7 @@ async fn run_swarm(mut swarm: Swarm<Behaviour>, inner: Arc<Inner>, mut boots: Ve
     let unpin_wss = inner.config.accept_rotated_wss_identity;
     // Pending dial -> bootstrap entry.
     let mut dialing: HashMap<ConnectionId, usize> = HashMap::new();
-    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut tick = Interval::new(Duration::from_secs(1));
 
     fn backoff(b: &mut Bootstrap, max: Duration) {
         b.next_dial = Instant::now() + b.delay;
@@ -513,7 +514,7 @@ async fn run_swarm(mut swarm: Swarm<Behaviour>, inner: Arc<Inner>, mut boots: Ve
 async fn run_pushes(inner: Arc<Inner>, mut incoming: libp2p_stream::IncomingStreams) {
     while let Some((peer, stream)) = incoming.next().await {
         let inner = inner.clone();
-        tokio::spawn(async move {
+        rt::spawn(async move {
             let push = match filter::read_push(stream, inner.config.request_timeout).await {
                 Ok(p) => p,
                 Err(e) => return debug!(%peer, error = %e, "bad filter push"),
@@ -543,7 +544,7 @@ async fn run_pushes(inner: Arc<Inner>, mut incoming: libp2p_stream::IncomingStre
 async fn run_metadata(inner: Arc<Inner>, mut incoming: libp2p_stream::IncomingStreams) {
     while let Some((peer, stream)) = incoming.next().await {
         let inner = inner.clone();
-        tokio::spawn(async move {
+        rt::spawn(async move {
             let cfg = &inner.config;
             match metadata::serve(stream, cfg.cluster_id, &cfg.shards, cfg.request_timeout).await {
                 Ok(remote) => record_cluster(&inner, peer, remote),
@@ -578,7 +579,7 @@ enum Job {
 /// Keeps the metadata check done and one filter subscription per service peer, matching the
 /// wanted topics, pinged before the service node forgets it.
 async fn run_upkeep(inner: Arc<Inner>, control: libp2p_stream::Control) {
-    let mut tick = tokio::time::interval(UPKEEP_TICK);
+    let mut tick = Interval::new(UPKEEP_TICK);
     loop {
         tokio::select! {
             _ = inner.wake.notified() => {}
@@ -587,7 +588,7 @@ async fn run_upkeep(inner: Arc<Inner>, control: libp2p_stream::Control) {
         for (peer, job) in plan(&inner) {
             let inner = inner.clone();
             let mut control = control.clone();
-            tokio::spawn(async move {
+            rt::spawn(async move {
                 match job {
                     Job::Metadata => {
                         let cfg = &inner.config;

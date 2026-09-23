@@ -43,14 +43,14 @@ pub async fn request(
             )),
         }
     };
-    tokio::time::timeout(timeout, exchange)
+    crate::rt::timeout(timeout, exchange)
         .await
         .unwrap_or_else(|_| Err("timed out".into()))
 }
 
 /// Reads the single push a service node writes on an inbound filter-push stream.
 pub async fn read_push(mut stream: Stream, timeout: Duration) -> Result<MessagePush, String> {
-    let push = tokio::time::timeout(timeout, read_lp::<_, MessagePush>(&mut stream))
+    let push = crate::rt::timeout(timeout, read_lp::<_, MessagePush>(&mut stream))
         .await
         .map_err(|_| "timed out".to_string())?
         .map_err(|e| e.to_string())?;

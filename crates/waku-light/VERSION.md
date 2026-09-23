@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 (2026-09-23)
+
+First step towards a browser build (pure web wallet). No behaviour change on native targets.
+
+* New `rt` module, the only place that names the executor and the clock: `spawn` (returns a
+  `Task` aborted through `futures::Abortable`), `sleep`, `timeout`, `Interval`, and `Instant` /
+  `SystemTime` from `web-time`. Native implementation on tokio, as before; the node, filter,
+  light push and metadata code no longer calls `tokio::time`, `tokio::spawn` or `std::time`.
+* tokio's `rt` and `time` features are now native-only dependencies; `sync` and `macros`
+  (`Notify`, `select!`) stay common, both build for wasm32.
+* Tests: `rt::abort_stops_a_task`, `rt::timeout_reports_elapsed`; the 10 earlier tests unchanged.
+* Next: websys transport and the wasm32 side of `rt` (0.3.0), validated with `cargo check
+  --target wasm32-unknown-unknown`, a wasm client in Node 22 against the loopback service node,
+  then a static page listening to the fleet.
+
 ## 0.1.4 (2026-09-23)
 
 * Validated against the Railgun fleet (example `fleet`, Sepolia): 10 fee announcements from 3

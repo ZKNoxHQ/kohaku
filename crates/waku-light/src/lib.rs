@@ -20,6 +20,7 @@ mod lightpush;
 mod metadata;
 mod node;
 pub mod proto;
+mod rt;
 
 use std::time::Duration;
 

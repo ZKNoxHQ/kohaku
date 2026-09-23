@@ -35,6 +35,13 @@ let status = node.status();                                   // peers, service 
 
 `start` spawns on the current tokio runtime. Dropping the node stops everything.
 
+## Targets
+
+Native (Linux, macOS, Android): tokio, TCP + DNS + rustls. A browser build (wasm32) is in
+progress: everything platform-dependent goes through the `rt` module (executor, timers, clock),
+and the transport will be the browser's own WebSocket (`libp2p-websocket-websys`), which also
+leaves TLS to the browser.
+
 ## Checking against the Railgun fleet
 
 Passive: subscribes to the fees topic and prints what arrives, publishes nothing.

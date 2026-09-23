@@ -87,7 +87,7 @@ pub async fn push(
         let _ = stream.close().await;
         outcome
     };
-    tokio::time::timeout(timeout, exchange)
+    crate::rt::timeout(timeout, exchange)
         .await
         .unwrap_or_else(|_| Err(PushError::Failed("timed out".into())))
 }

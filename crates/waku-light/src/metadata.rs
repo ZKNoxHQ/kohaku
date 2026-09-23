@@ -29,7 +29,7 @@ pub async fn serve(
         let _ = stream.close().await;
         Ok(req.cluster_id)
     };
-    tokio::time::timeout(timeout, exchange)
+    crate::rt::timeout(timeout, exchange)
         .await
         .unwrap_or_else(|_| Err("timed out".into()))
 }
@@ -50,7 +50,7 @@ pub async fn query(
         let _ = stream.close().await;
         Ok(resp.cluster_id)
     };
-    tokio::time::timeout(timeout, exchange)
+    crate::rt::timeout(timeout, exchange)
         .await
         .unwrap_or_else(|_| Err("timed out".into()))
 }

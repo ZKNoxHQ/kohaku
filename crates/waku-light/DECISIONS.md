@@ -53,3 +53,16 @@ operator controls; the libp2p pin adds protection only against someone holding a
 certificate for that name. On `/ws` or `/tcp` the pin is the only authentication, so there it is
 enforced. The change of identity is logged with both ids so that a real key change can be told
 apart from an attack after the fact.
+
+## ADR-008: one runtime seam for native and browser builds
+
+A browser has no tokio timer driver, no `std::time::Instant` (it panics on
+wasm32-unknown-unknown) and no threads, so its futures need not be `Send`. Rather than scatter
+`cfg(target_arch)` through the node, everything that depends on the platform goes through `rt`:
+spawn, sleep, timeout, interval, clock. Task cancellation uses `futures::Abortable` on every
+target, so dropping a `LightNode` behaves the same whatever the executor. `MaybeSend` is `Send`
+on native targets and will be empty on wasm32, where `spawn` maps to `spawn_local`.
+
+The protocol code (framing, protobufs, filter, light push, metadata, deduplication, identity
+handling) is target-independent already. What remains target-specific after this seam is the
+transport (TCP + DNS + rustls natively, the browser's WebSocket in wasm) and the swarm executor.
