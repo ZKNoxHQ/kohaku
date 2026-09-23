@@ -8,10 +8,11 @@ use tracing::info;
 
 use railgun::{
     account::{
+        address::RailgunAddress,
         chain::ChainId,
         signer::{RailgunSigner, RailgunSignerError},
     },
-    crypto::keys::{HexKey, SpendingPublicKey, SpendingSignature, ViewingKey},
+    crypto::keys::{SpendingPublicKey, SpendingSignature, ViewingKey},
 };
 
 use crate::{
@@ -44,27 +45,44 @@ pub struct LedgerSigner<E> {
 }
 
 impl<E: Exchange> LedgerSigner<E> {
-    /// Connects and caches the account's public material.
-    ///
-    /// Three user approvals on the device, in order: spending public key, viewing key
-    /// export, viewing public key (the production firmware displays all three). The
-    /// exported viewing key is checked against the device's viewing *public* key before
-    /// anything depends on it.
+    /// Connects with no host-side cache: exports the viewing key and fetches the
+    /// spending public key (two device approvals). See [`Self::connect_cached`] to
+    /// skip the spending-pubkey prompt when the host already holds it.
     pub async fn connect(
         device: E,
         chain_id: ChainId,
         account_index: u32,
     ) -> Result<Arc<Self>, LedgerError> {
+        Self::connect_cached(device, chain_id, account_index, None).await
+    }
+
+    /// Connects reusing cached *public* material (spending pubkey + 0zk address) the
+    /// host persisted from a previous session.
+    ///
+    /// The viewing key is always exported from the device (one approval) — it is the
+    /// scanning secret and is never cached. Its public key is then compared against the
+    /// cached address's viewing pubkey: on a match the cached spending pubkey still
+    /// belongs to this device/seed and is reused with no further prompt; on a mismatch
+    /// (first run, different account, or a changed passphrase seed) the spending pubkey
+    /// is fetched from the device (a second approval) so the caller can refresh its cache
+    /// from [`RailgunSigner::spending_public_key`] and [`RailgunSigner::address`].
+    pub async fn connect_cached(
+        device: E,
+        chain_id: ChainId,
+        account_index: u32,
+        cached: Option<(SpendingPublicKey, RailgunAddress)>,
+    ) -> Result<Arc<Self>, LedgerError> {
         let version = protocol::get_version(&device).await?;
-        let spending_pubkey = protocol::get_spending_public_key(&device, account_index).await?;
         let viewing_key = protocol::export_viewing_key(&device, account_index).await?;
 
-        // A wrong or truncated seed export would silently break scanning and nullifiers:
-        // cross-check it against the pubkey the device derives itself.
-        let device_viewing_pubkey = protocol::get_viewing_public_key(&device, account_index).await?;
-        if viewing_key.public_key().to_hex() != hex::encode(device_viewing_pubkey) {
-            return Err(ProtocolError::ViewingKeyMismatch.into());
-        }
+        let spending_pubkey = match cached {
+            Some((spending_pubkey, address))
+                if address.viewing_pubkey() == viewing_key.public_key() =>
+            {
+                spending_pubkey
+            }
+            _ => protocol::get_spending_public_key(&device, account_index).await?,
+        };
 
         info!(
             app_version = format!("{}.{}.{}", version.0, version.1, version.2),

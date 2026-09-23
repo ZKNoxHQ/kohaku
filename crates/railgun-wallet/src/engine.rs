@@ -33,6 +33,7 @@ use railgun::{
     builder::RailgunBuilder,
     caip::AssetId,
     chain_config::ChainConfig,
+    crypto::keys::SpendingPublicKey,
     provider::RailgunProvider,
     transact::{RelayAction, TransactionBuilder},
 };
@@ -84,6 +85,49 @@ fn default_rpc_url(chain_id: u64) -> Option<&'static str> {
 
 fn default_bundler_url(chain_id: u64) -> String {
     format!("https://public.pimlico.io/v2/{chain_id}/rpc")
+}
+
+/// Cached *public* material for a Ledger account, so a re-open can skip the spending-pubkey
+/// prompt. No secret is stored here: the viewing key is re-exported from the device each
+/// unlock and its public key validates these values (see `LedgerSigner::connect_cached`).
+#[derive(Serialize, Deserialize)]
+struct LedgerCache {
+    spending_pubkey: SpendingPublicKey,
+    address: String,
+}
+
+fn ledger_cache_path(base_dir: &Path, chain_id: u64, account: u32) -> PathBuf {
+    base_dir
+        .join(chain_id.to_string())
+        .join(format!("ledger-{account}.json"))
+}
+
+fn read_ledger_cache(path: &Path) -> Option<(SpendingPublicKey, RailgunAddress)> {
+    let bytes = std::fs::read(path).ok()?;
+    let cache: LedgerCache = serde_json::from_slice(&bytes).ok()?;
+    let address = RailgunAddress::from_str(&cache.address).ok()?;
+    Some((cache.spending_pubkey, address))
+}
+
+fn write_ledger_cache(path: &Path, spending_pubkey: SpendingPublicKey, address: &RailgunAddress) {
+    let cache = LedgerCache {
+        spending_pubkey,
+        address: address.to_string(),
+    };
+    let Ok(bytes) = serde_json::to_vec_pretty(&cache) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Public data, but keep it owner-only alongside the wallet's other files.
+    if std::fs::write(path, &bytes).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
 }
 
 /// A broadcaster of the reference implementation takes its gas cost plus a margin of 10 to
@@ -480,25 +524,37 @@ impl Engine {
         let (signer, keys, derivation): (Arc<dyn RailgunSigner>, Option<keys::RailgunKeys>, &'static str) =
             if p.ledger {
                 let transport = p.ledger_transport.as_deref().unwrap_or("usb");
+                // Public material cached from a previous unlock (0zk address + spending
+                // pubkey). Lets connect_cached skip the spending-pubkey prompt when the
+                // exported viewing key still matches — so the normal case is one prompt.
+                let cache_path = ledger_cache_path(&self.base_dir, chain.id, p.index);
+                let cached = read_ledger_cache(&cache_path);
                 let signer: Arc<dyn RailgunSigner> = match transport {
                     "ble" | "bluetooth" => {
                         let device = railgun_ledger::BleLedger::connect()
                             .await
                             .map_err(|e| anyhow!("Ledger over BLE: {e}"))?;
-                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
-                            .await
-                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
+                        railgun_ledger::LedgerSigner::connect_cached(
+                            device, RgChainId::All, p.index, cached,
+                        )
+                        .await
+                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
                     }
                     "usb" => {
                         let device = railgun_ledger::transport::usb::UsbLedger::init()
                             .await
                             .map_err(|e| anyhow!("Ledger: {e} (device plugged in and unlocked?)"))?;
-                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
-                            .await
-                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
+                        railgun_ledger::LedgerSigner::connect_cached(
+                            device, RgChainId::All, p.index, cached,
+                        )
+                        .await
+                        .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?
                     }
                     other => bail!("unknown Ledger transport {other:?} (use \"usb\" or \"ble\")"),
                 };
+                // Refresh the cache with whatever the signer settled on (unchanged on a
+                // cache hit, updated when the spending pubkey was re-fetched).
+                write_ledger_cache(&cache_path, signer.spending_public_key(), &signer.address());
                 (signer, None, "ledger")
             } else {
                 let (keys, derivation) = match (&p.mnemonic, &p.spending_key, &p.viewing_key) {
