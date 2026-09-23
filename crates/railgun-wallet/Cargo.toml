@@ -1,6 +1,6 @@
 [package]
 name = "railgun-wallet"
-version = "0.10.0"
+version = "0.12.1"
 edition = "2024"
 description = "ZKNOX local Railgun wallet (daemon + web front) built on the kohaku Rust SDK"
 publish = false
@@ -8,6 +8,12 @@ publish = false
 [[bin]]
 name = "railgun-wallet"
 path = "src/main.rs"
+
+[features]
+default = ["native-waku"]
+# Native Waku light node (rust-libp2p) for the legacy transport: Waku mode "native". Without it,
+# "native" falls back to the node in the page ("browser").
+native-waku = ["railgun-broadcaster/light-node"]
 
 [dependencies]
 alloy = { workspace = true, default-features = true }

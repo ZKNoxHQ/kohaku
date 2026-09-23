@@ -20,7 +20,7 @@ Log verbosity follows `RUST_LOG` (default `info`).
 | Tab | State | Path |
 |---|---|---|
 | 4337 | active on chains with a privacy paymaster (mainnet, Sepolia) | `RailgunProvider::prepare_userop`, fresh 7702 sender per operation, fee note in shielded wrapped base token |
-| legacy | active when the Waku node reports a usable offer | `railgun-broadcaster`: fee note pinned first, `minGasPrice`, pre-transaction POIs, sealed request over Waku. The Waku node runs in the wallet tab (js-waku), keep the tab open; a local nwaku over REST is the alternative, see `crates/railgun-broadcaster/README.md` |
+| legacy | active when the Waku node reports a usable offer | `railgun-broadcaster`: fee note pinned first, `minGasPrice`, pre-transaction POIs, sealed request over Waku. The Waku node runs inside the daemon (native light node, `waku-light`) and dials the Railgun fleet over wss on port 8000; the js-waku node of the wallet tab and a local nwaku over REST remain as alternatives, see `crates/railgun-broadcaster/README.md` |
 | direct (debug) | active when a public key is loaded | `RailgunProvider::build` then `transact()` from the public EOA. Links the EOA to the transaction |
 
 Shielding is a public transaction and always goes out from the public EOA.

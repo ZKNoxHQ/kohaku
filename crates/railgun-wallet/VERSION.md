@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.12.1 (2026-09-23)
+
+Waku mode "native", the new default: the legacy transport's Waku node runs inside the daemon
+(`railgun-broadcaster::LightNodeTransport` on `waku-light`, rust-libp2p) instead of js-waku in
+the wallet tab. No tab to keep open, no JavaScript on that path. Rebased onto the Ledger signer
+work (`railgun-ledger`); 0.10.1 and 0.11.x belong to the Android branch, not merged here.
+
+* Unlock form: "Native, inside the wallet" first in the Waku node list. A stored "browser" choice
+  is switched to "native" once; choosing "browser" again afterwards sticks. "browser" and
+  "nwaku" are unchanged and stay available as fallbacks.
+* Cargo feature `native-waku`, on by default. A build without it maps "native" to "browser"
+  with a warning instead of failing the unlock; `/api/defaults` reports `nativeWaku` and the
+  front hides the option in that case.
+* Status texts for the native mode (connecting, not ready with the node's last error).
+* The front log carries the native node's own events (`waku_light`: peers connected and lost,
+  filter subscriptions, dial failures) and one line per light push with the number of peers
+  that accepted it.
+* After a broadcaster time-out, the delivery count is reported whatever the Waku mode
+  ("publishes by the native node: N accepted by a Waku peer, M failed"), from the transport's
+  counters. A request no peer accepted no longer marks the broadcaster as silent, and the closing
+  message points at the node rather than at the tab.
+* Measured against the fleet before this release (Sepolia): the node subscribes to 2 or 3 fleet
+  nodes in 5 to 30 s, and the four Railway trusted signers' rates and the offers of four
+  broadcasters arrive as with the tab's node. Receiving is validated in the wallet; the first
+  legacy send through the native node is still to be confirmed.
+* Known: a fleet node sometimes closes the connection once, 10 to 45 s after it opened; the node
+  reconnects and subscribes again within about 12 s.
+
 ## 0.10.0 (2026-09-20)
 
 Native unshield (unwrap and deliver the chain currency) on the legacy and direct transports.

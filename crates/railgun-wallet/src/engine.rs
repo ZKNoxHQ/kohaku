@@ -148,6 +148,21 @@ const SILENT_BROADCASTER_PENALTY: Duration = Duration::from_secs(600);
 
 const DEFAULT_WAKU_URL: &str = "http://127.0.0.1:8645";
 
+/// Whether this build carries the native Waku light node (feature `native-waku`).
+pub const NATIVE_WAKU: bool = cfg!(feature = "native-waku");
+
+/// Waku light node in this process, dialling the Railgun fleet itself. Starts on the first call
+/// of the fee monitor, on the I/O runtime, and stops when the session is replaced.
+#[cfg(feature = "native-waku")]
+fn native_transport(chain_id: u64) -> Arc<dyn WakuTransport> {
+    Arc::new(railgun_broadcaster::LightNodeTransport::for_chain(chain_id))
+}
+
+#[cfg(not(feature = "native-waku"))]
+fn native_transport(_chain_id: u64) -> Arc<dyn WakuTransport> {
+    unreachable!("\"native\" is mapped to \"browser\" without the native-waku feature")
+}
+
 /// Gas assumed for the first fee guess, before the dummy-proof estimate replaces it.
 const FIRST_GUESS_GAS: u64 = 700_000;
 
@@ -244,7 +259,8 @@ pub struct UnlockParams {
     pub bundler_url: Option<String>,
     /// REST root of a local nwaku node on the Railgun shard, for the legacy transport.
     pub waku_url: Option<String>,
-    /// "browser" (default): js-waku in the wallet tab. "nwaku": local node at `waku_url`.
+    /// "native" (default): Waku light node inside the daemon. "browser": js-waku in the wallet
+    /// tab. "nwaku": local node at `waku_url`.
     pub waku_mode: Option<String>,
     /// 0zk addresses of trusted fee signers, separated by commas, spaces or new lines. Offers of
     /// other broadcasters are then capped to a band around the signers' rates.
@@ -688,14 +704,21 @@ impl Engine {
             .map(str::to_string)
             .collect();
         let waku_mode = match p.waku_mode.as_deref().map(str::trim) {
-            None | Some("") | Some("browser") => "browser",
+            None | Some("") | Some("native") if NATIVE_WAKU => "native",
+            None | Some("") | Some("native") => {
+                warn!("this build has no native Waku node, using the node of the page");
+                "browser"
+            }
+            Some("browser") => "browser",
             Some("nwaku") => "nwaku",
-            Some(other) => bail!("unknown Waku mode \"{other}\" (expected browser or nwaku)"),
+            Some(other) => {
+                bail!("unknown Waku mode \"{other}\" (expected native, browser or nwaku)")
+            }
         };
-        let transport: Arc<dyn WakuTransport> = if waku_mode == "browser" {
-            self.shared.bridge.clone()
-        } else {
-            Arc::new(NwakuRest::new(waku_url.clone()))
+        let transport: Arc<dyn WakuTransport> = match waku_mode {
+            "browser" => self.shared.bridge.clone(),
+            "nwaku" => Arc::new(NwakuRest::new(waku_url.clone())),
+            _ => native_transport(chain.id),
         };
         let broadcaster = Arc::new(if trusted_signers.is_empty() {
             BroadcasterClient::new(transport, chain.id)
@@ -1310,7 +1333,7 @@ impl Session {
             &mut rand::rng(),
         )?;
 
-        let stats_before = self.bridge.as_ref().map(|b| b.publish_stats());
+        let stats_before = self.broadcaster.publish_stats();
         ctx.step("request sealed and published, waiting for the broadcaster (up to 120s)");
         let client = self.broadcaster.clone();
         let outcome = self
@@ -1332,15 +1355,16 @@ impl Session {
             Err(ClientError::Timeout(_)) => {
                 // Did the request leave the tab at all? A light push that fails looks the same
                 // as a broadcaster that stays silent, and the remedy is not.
-                let delivery = match (&self.bridge, stats_before) {
-                    (Some(bridge), Some(before)) => {
-                        let after = bridge.publish_stats();
+                let delivery = match (self.broadcaster.publish_stats(), stats_before) {
+                    (Some(after), Some(before)) => {
                         let delivered = after.delivered - before.delivered;
                         let failed = after.failed - before.failed;
                         let unacked = (after.queued - before.queued).saturating_sub(delivered + failed);
+                        let via = if self.bridge.is_some() { "through the tab" } else { "by the native node" };
                         ctx.step(format!(
-                            "publishes through the tab: {delivered} accepted by a Waku peer, {failed} failed{}, {unacked} never acknowledged by the tab",
-                            after.last_error.as_ref().filter(|_| failed > 0).map(|e| format!(" ({e})")).unwrap_or_default()
+                            "publishes {via}: {delivered} accepted by a Waku peer, {failed} failed{}{}",
+                            after.last_error.as_ref().filter(|_| failed > 0).map(|e| format!(" ({e})")).unwrap_or_default(),
+                            if unacked > 0 { format!(", {unacked} never acknowledged") } else { String::new() }
                         ));
                         Some(delivered)
                     }
@@ -1393,9 +1417,12 @@ impl Session {
                      unspent: the transaction was not sent. Nothing was paid. {dropped} pending \
                      POI entr{} dropped. {}",
                     if dropped == 1 { "y" } else { "ies" },
-                    if delivery == Some(0) {
+                    if delivery == Some(0) && self.bridge.is_some() {
                         "The request never left this tab: reload the page so its Waku node \
                          reconnects, then retry."
+                    } else if delivery == Some(0) {
+                        "No Waku peer accepted the request: check the state of the native Waku \
+                         node in the legacy panel and the log, then retry."
                     } else {
                         "The request was delivered to the Waku network, so this broadcaster is \
                          the silent party: it is left out of the draw for 10 minutes, retry to \

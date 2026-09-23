@@ -188,6 +188,7 @@ async fn waku_exchange(State(state): State<AppState>, Json(body): Json<ExchangeB
 async fn defaults() -> Response {
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "nativeWaku": crate::engine::NATIVE_WAKU,
         "waku": {
             "clusterId": railgun_broadcaster::wire::CLUSTER_ID,
             "shardId": railgun_broadcaster::wire::SHARD_ID,
