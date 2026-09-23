@@ -11,6 +11,7 @@ members = [
     "crates/railgun-ledger",
     "crates/railgun-ts",
     "crates/railgun-broadcaster",
+    "crates/waku-light",
     "crates/railgun-wallet",
     "crates/tornadocash",
     "crates/userop-kit",
