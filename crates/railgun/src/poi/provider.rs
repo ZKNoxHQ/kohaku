@@ -40,6 +40,9 @@ pub struct PoiProvider {
     db: Arc<dyn Database>,
     poi_client: PoiClient,
     txid_indexer: TxidIndexer,
+    /// ZKNOX viewer: statuses and txid tree only, never generate or submit proofs. Required for
+    /// view-only signers, which cannot produce valid POI inputs.
+    read_only: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -154,7 +157,13 @@ impl PoiProvider {
             db,
             poi_client,
             txid_indexer,
+            read_only: false,
         })
+    }
+
+    /// ZKNOX viewer: disables proof generation, recovery and submission.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
     }
 
     pub async fn sync_to(
@@ -182,6 +191,11 @@ impl PoiProvider {
             );
         }
 
+        if self.read_only {
+            self.save().await?;
+            return Ok(());
+        }
+
         let recovered = self.recover_missing(accounts).await;
         if recovered > 0 {
             info!("Queued {recovered} past operation(s) for POI proof generation");
@@ -190,6 +204,78 @@ impl PoiProvider {
         self.submit_pending(prover).await;
         self.save().await?;
         Ok(())
+    }
+
+    /// ZKNOX viewer: status per list of one blinded commitment, asked to the POI node now.
+    /// `status()` folds the lists into the worst status; this keeps them apart. A list that
+    /// cannot be reached yields `None`.
+    pub async fn statuses_per_list(
+        &mut self,
+        blinded_commitment: BlindedCommitment,
+        commitment_type: BlindedCommitmentType,
+    ) -> Vec<(String, Option<PoiStatus>)> {
+        let mut out = Vec::new();
+        for list_key in self.list_keys() {
+            let name = serde_json::to_value(&list_key)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| list_key.to_string());
+            let status = match self
+                .poi_client
+                .poi_status(&list_key, blinded_commitment, commitment_type)
+                .await
+            {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    debug!("POI status probe failed for {blinded_commitment} ({list_key}): {e}");
+                    None
+                }
+            };
+            out.push((name, status));
+        }
+        out
+    }
+
+    /// ZKNOX viewer: past operations whose POI the recovery pass saw as `Valid` on the node.
+    pub fn recovered_valid(&self) -> Vec<Txid> {
+        self.inner.recovered_valid.iter().copied().collect()
+    }
+
+    /// ZKNOX viewer: operations of the registered accounts that the txid indexer keeps in full.
+    pub fn own_operations(&self) -> Vec<(Txid, crate::indexer::syncer::Operation)> {
+        self.txid_indexer
+            .own_ops()
+            .map(|(txid, op)| (txid.clone(), op.clone()))
+            .collect()
+    }
+
+    /// ZKNOX viewer: last known status per list of every blinded commitment probed so far,
+    /// keyed by the blinded commitment as `0x` + 64 hex digits.
+    pub fn statuses(&self) -> Vec<(String, Vec<(String, Option<PoiStatus>)>)> {
+        self.inner
+            .pois
+            .iter()
+            .map(|(commitment, per_list)| {
+                // Display is `BlindedCommitment(0x…)`, not zero-padded.
+                let raw = commitment.to_string();
+                let hex = raw
+                    .trim_start_matches("BlindedCommitment(")
+                    .trim_end_matches(')')
+                    .trim_start_matches("0x");
+                let key = format!("0x{:0>64}", hex);
+                let lists = per_list
+                    .iter()
+                    .map(|(list, info)| {
+                        let name = serde_json::to_value(list)
+                            .ok()
+                            .and_then(|v| v.as_str().map(str::to_owned))
+                            .unwrap_or_else(|| list.to_string());
+                        (name, info.status.clone())
+                    })
+                    .collect();
+                (key, lists)
+            })
+            .collect()
     }
 
     pub async fn register_ops(

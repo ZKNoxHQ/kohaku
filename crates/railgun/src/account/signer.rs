@@ -29,13 +29,15 @@ pub trait RailgunSigner: MaybeSend {
     fn spending_public_key(&self) -> SpendingPublicKey;
     async fn sign(&self, inputs: U256) -> Result<SpendingSignature, RailgunSignerError>;
 
+    /// ZKNOX fork: master public key. A view-only signer built from a 0zk address overrides it,
+    /// since the address carries the master key but not the spending public key.
+    fn master_public_key(&self) -> MasterPublicKey {
+        MasterPublicKey::new(self.spending_public_key(), self.viewing_key().nullifying_key())
+    }
+
     fn address(&self) -> RailgunAddress {
-        let master_key = MasterPublicKey::new(
-            self.spending_public_key(),
-            self.viewing_key().nullifying_key(),
-        );
         RailgunAddress::from_public_keys(
-            master_key,
+            self.master_public_key(),
             self.viewing_key().public_key(),
             self.chain_id(),
         )

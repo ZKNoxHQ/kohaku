@@ -8166,6 +8166,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-viewer"
+version = "0.2.17"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "crypto",
+ "hex",
+ "railgun",
+ "railgun-broadcaster",
+ "railgun-wallet",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "railgun-viewer-web"
+version = "0.1.1"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bip32",
+ "bip39",
+ "console_error_panic_hook",
+ "futures",
+ "gloo-timers 0.3.0",
+ "hex",
+ "hmac 0.12.1",
+ "js-sys",
+ "kohaku-db",
+ "railgun",
+ "railgun-broadcaster",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
+ "tracing-wasm",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-time",
+]
+
+[[package]]
 name = "railgun-wallet"
 version = "0.13.0"
 dependencies = [

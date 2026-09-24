@@ -14,6 +14,8 @@ members = [
     "crates/waku-light",
     "crates/railgun-wallet",
     "crates/railgun-wallet-android",
+    "crates/railgun-viewer",
+    "crates/railgun-viewer-web",
     "crates/tornadocash",
     "crates/userop-kit",
     "crates/userop-kit-ts",

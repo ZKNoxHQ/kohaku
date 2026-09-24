@@ -24,7 +24,7 @@ use crate::{
     chain_config::ChainConfig,
     circuit::groth16_prover::Groth16Prover,
     indexer::utxo_indexer::{UtxoIndexer, UtxoIndexerError},
-    note::{Note, utxo::UtxoNote},
+    note::Note,
     poi::{
         provider::{PoiProvider, PoiProviderError},
         types::{BlindedCommitmentType, PoiStatus, PreTransactionPois},
@@ -208,6 +208,66 @@ impl RailgunProvider {
         self.poi_provider
             .as_ref()
             .map(|p| p.pending_summaries())
+            .unwrap_or_default()
+    }
+
+    /// ZKNOX viewer: full state of a registered account (unspent, spent and sent notes).
+    pub fn account_state(&self, address: RailgunAddress) -> Option<IndexedAccountState> {
+        self.utxo_indexer.account_state(address)
+    }
+
+    /// ZKNOX viewer: our own operations as kept by the txid indexer (POI enabled only), keyed
+    /// by the railgun txid as `0x` + 64 hex digits.
+    pub fn own_operations(&self) -> Vec<(String, Operation)> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| {
+                p.own_operations()
+                    .into_iter()
+                    .map(|(txid, op)| {
+                        let raw: U256 = txid.into();
+                        (format!("0x{raw:064x}"), op)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// ZKNOX viewer: railgun txids (`0x` + 64 hex digits) of past operations whose POI the
+    /// recovery pass found `Valid`.
+    pub fn poi_recovered_valid(&self) -> Vec<String> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| {
+                p.recovered_valid()
+                    .into_iter()
+                    .map(|t| {
+                        let raw: U256 = t.into();
+                        format!("0x{raw:064x}")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// ZKNOX viewer: asks the POI node for the status per list of one blinded commitment.
+    /// Empty when POI is off.
+    pub async fn probe_poi(
+        &mut self,
+        blinded_commitment: U256,
+        commitment_type: BlindedCommitmentType,
+    ) -> Vec<(String, Option<PoiStatus>)> {
+        match &mut self.poi_provider {
+            Some(p) => p.statuses_per_list(blinded_commitment.into(), commitment_type).await,
+            None => Vec::new(),
+        }
+    }
+
+    /// ZKNOX viewer: POI status per list keyed by blinded commitment (`0x` + 64 hex digits).
+    pub fn poi_statuses(&self) -> Vec<(String, Vec<(String, Option<PoiStatus>)>)> {
+        self.poi_provider
+            .as_ref()
+            .map(|p| p.statuses())
             .unwrap_or_default()
     }
 
@@ -842,3 +902,13 @@ mod abi {
     );
 }
 
+
+// ZKNOX viewer: read-model types re-exported for crates that do not reach into the indexer modules.
+pub use crate::indexer::indexed_account::IndexedAccountState;
+pub use crate::indexer::syncer::Operation;
+pub use crate::note::{
+    sent::SentNote,
+    utxo::{UtxoNote, blinded_commitment},
+};
+// Aliased: `BlindedCommitmentType` is already imported privately above.
+pub use crate::poi::types::BlindedCommitmentType as CommitmentKind;
