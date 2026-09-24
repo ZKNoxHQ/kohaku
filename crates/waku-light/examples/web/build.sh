@@ -16,4 +16,4 @@ cargo build --release -p waku-light --example web_fleet --target wasm32-unknown-
 wasm-bindgen --target web --no-typescript --out-dir "$here/pkg" \
   target/wasm32-unknown-unknown/release/examples/web_fleet.wasm
 ls -la "$here/pkg"
-echo "serve with: python3 -m http.server 8088 -d $here   then open http://localhost:8088"
+echo "serve with: python3 -m http.server 8088 -d $here   then open http://localhost:8088 (page) or http://localhost:8088/worker.html (Web Worker)"

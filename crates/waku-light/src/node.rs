@@ -396,25 +396,31 @@ impl LightNode {
             let pubsub = pubsub.clone();
             let inner = self.inner.clone();
             async move {
+                let mut used = version;
                 let mut result = lightpush::push(
                     &mut control, peer, version, inner.request_id(), &pubsub, message.clone(), timeout,
                 )
                 .await;
                 if matches!(result, Err(PushError::Unsupported)) && version == Version::V3 {
+                    used = Version::V2;
                     result = lightpush::push(
                         &mut control, peer, Version::V2, inner.request_id(), &pubsub, message, timeout,
                     )
                     .await;
                 }
-                (peer, result)
+                (peer, used, result)
             }
         }))
         .await;
 
         let mut report = PublishReport::default();
-        for (peer, result) in outcomes {
+        for (peer, used, result) in outcomes {
             match result {
-                Ok(()) => report.accepted += 1,
+                Ok(()) => {
+                    report.accepted += 1;
+                    let v = if used == Version::V3 { "v3" } else { "v2" };
+                    report.accepted_via.push(format!("{peer} (lightpush {v})"));
+                }
                 Err(PushError::Unsupported) => report.failures.push(format!("{peer}: light push not supported")),
                 Err(PushError::Failed(e)) => report.failures.push(format!("{peer}: {e}")),
             }

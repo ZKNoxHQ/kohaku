@@ -42,7 +42,16 @@ let status = node.status();                                   // peers, service 
   (`libp2p-websocket-websys`), which leaves DNS and TLS to the browser; `spawn_local` and
   wasm-bindgen timers. `cargo check -p waku-light --target wasm32-unknown-unknown`.
 
-Browser demo, passive (lists the broadcasters announcing fees on the chosen chain):
+Light push check, native, touching no broadcaster (publishes on a content topic of its own and
+waits for the fleet to push it back):
+
+```sh
+cargo run --release -p waku-light --example echo -- 3
+```
+
+Browser demo (lists the broadcasters announcing fees on the chosen chain; its "Echo test" button
+runs the same light push check from the page; `worker.html` runs the same node in a dedicated Web
+Worker):
 
 ```sh
 cargo install wasm-bindgen-cli --version 0.2.108 --locked   # once, matches the workspace pin

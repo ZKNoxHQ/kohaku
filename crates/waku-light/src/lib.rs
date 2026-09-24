@@ -104,6 +104,8 @@ pub struct Message {
 pub struct PublishReport {
     /// Peers that accepted the light push.
     pub accepted: usize,
+    /// `peer (lightpush v3|v2)` for each acceptance.
+    pub accepted_via: Vec<String>,
     /// `peer: reason` for each refusal or failure.
     pub failures: Vec<String>,
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1 (2026-09-23)
+
+* Echo test validated natively against the fleet: 3/3 light pushes accepted (lightpush v3),
+  3/3 echoed, median round trip 821 ms. A fleet node that had just joined answered v3 status 505
+  ("No peers for topic, skipping publish"), counted as a refusal for that peer while another
+  accepted: the v3 status codes tell a node that cannot relay from one that did.
+* Browser demo hosted in a dedicated Web Worker (`examples/web/worker.html`, `worker.js`), the
+  form a web wallet takes: node, polling and echo test run in the worker, the page renders what
+  it posts. Shows the largest gap between two of the worker's 1 s ticks, to measure throttling
+  when the tab is in the background. Exercises the worker branch of `libp2p-websocket-websys`.
+
+## 0.4.0 (2026-09-23)
+
+Light push check without any broadcaster involved.
+
+* `PublishReport::accepted_via`: `peer (lightpush v3|v2)` for each peer that accepted, so a
+  publish says which protocol version the fleet took.
+* Example `echo` (native): subscribes to `/zknox-waku-light/1/echo/json`, a content topic outside
+  every Railgun topic, publishes timestamped messages on it and waits for each to come back
+  through filter (light push to the fleet, relay between its nodes, filter push back). Reports
+  acceptance per peer and the round trip.
+* Browser demo: "Echo test" button, same test from the page; `WebNode::subscribe` and
+  `WebNode::publish` (Promise with the report).
+
 ## 0.3.1 (2026-09-23)
 
 * Browser demo: example `web_fleet` (cdylib, wasm-bindgen) and `examples/web/` (page, build

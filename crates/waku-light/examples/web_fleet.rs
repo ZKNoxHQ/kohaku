@@ -1,13 +1,14 @@
 //! waku-light in a browser: a light node on the page's own WebSocket, listening to the fee
-//! announcements of the Railgun fleet. Passive: it publishes nothing.
+//! announcements of the Railgun fleet. The only thing it can publish is the echo test, on a
+//! content topic of its own that no broadcaster listens to.
 //!
 //! Build and serve: `crates/waku-light/examples/web/build.sh`, then open http://localhost:8088.
 //! On native targets this example compiles to an empty library.
 #![cfg(target_arch = "wasm32")]
 
-use std::sync::Once;
+use std::{rc::Rc, sync::Once};
 
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use waku_light::{Config, LightNode};
 
@@ -38,7 +39,7 @@ fn init_once() {
 /// One light node, subscribed to the fees topic of a chain. `free()` stops it.
 #[wasm_bindgen]
 pub struct WebNode {
-    node: LightNode,
+    node: Rc<LightNode>,
     topic: String,
 }
 
@@ -55,7 +56,7 @@ impl WebNode {
         let node = LightNode::start(Config::new(bootstrap, 5, 1)).map_err(|e| JsError::new(&e.to_string()))?;
         let topic = format!("/railgun/v2/0-{chain_id}-fees/json");
         node.subscribe([topic.clone()]);
-        Ok(WebNode { node, topic })
+        Ok(WebNode { node: Rc::new(node), topic })
     }
 
     #[wasm_bindgen(js_name = peerId)]
@@ -65,6 +66,29 @@ impl WebNode {
 
     pub fn topic(&self) -> String {
         self.topic.clone()
+    }
+
+    /// Adds a content topic to the filter subscription.
+    pub fn subscribe(&self, topic: String) {
+        self.node.subscribe([topic]);
+    }
+
+    /// Light push. Resolves to `{ accepted, via: [..], failures: [..] }`, rejects when no peer
+    /// accepted.
+    pub fn publish(&self, topic: String, payload: Vec<u8>) -> Promise {
+        let node = self.node.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            match node.publish(&topic, &payload).await {
+                Ok(report) => {
+                    let o = Object::new();
+                    set(&o, "accepted", report.accepted as u32);
+                    set(&o, "via", report.accepted_via.iter().map(|s| JsValue::from_str(s)).collect::<Array>());
+                    set(&o, "failures", report.failures.iter().map(|s| JsValue::from_str(s)).collect::<Array>());
+                    Ok(o.into())
+                }
+                Err(e) => Err(JsValue::from_str(&e.to_string())),
+            }
+        })
     }
 
     /// `{ connectedPeers, servicePeers, filterSubscriptions, lastError }`

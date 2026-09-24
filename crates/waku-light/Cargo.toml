@@ -1,6 +1,6 @@
 [package]
 name = "waku-light"
-version = "0.3.1"
+version = "0.4.1"
 edition = "2024"
 description = "Waku light client (filter v2 + light push v2/v3 + metadata) on rust-libp2p"
 publish = false
