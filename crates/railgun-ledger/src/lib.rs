@@ -26,3 +26,9 @@ pub use transport::{Apdu, ApduResponse, Exchange, TransportError};
 
 #[cfg(all(native, feature = "ble"))]
 pub use transport::ble::BleLedger;
+
+#[cfg(all(wasm, feature = "webusb"))]
+pub use transport::webusb::WebUsbLedger;
+
+#[cfg(all(wasm, feature = "webble"))]
+pub use transport::webble::WebBleLedger;

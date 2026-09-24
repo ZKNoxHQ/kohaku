@@ -8132,6 +8132,7 @@ dependencies = [
  "crypto",
  "futures",
  "hex",
+ "js-sys",
  "num-bigint",
  "railgun",
  "ruint",
@@ -8139,6 +8140,9 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -8152,6 +8156,7 @@ dependencies = [
  "js-sys",
  "kohaku-db",
  "railgun",
+ "railgun-ledger",
  "rand 0.10.3",
  "serde",
  "serde-wasm-bindgen",

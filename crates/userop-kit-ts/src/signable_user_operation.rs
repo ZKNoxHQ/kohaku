@@ -37,6 +37,20 @@ impl JsSignableUserOperation {
         self.inner.entry_point.to_string()
     }
 
+    /// Sum of all gas limits in the operation. Decimal string.
+    #[wasm_bindgen(getter, js_name = "totalGasLimit")]
+    pub fn total_gas_limit(&self) -> String {
+        self.inner.total_gas_limit().to_string()
+    }
+
+    /// `totalGasLimit × maxFeePerGas`: the ETH (wei) the EntryPoint requires the paymaster's
+    /// deposit to cover — the value the `AA31 paymaster deposit too low` check compares against.
+    /// Decimal string.
+    #[wasm_bindgen(getter, js_name = "maxCost")]
+    pub fn max_cost(&self) -> String {
+        (self.inner.total_gas_limit() * self.inner.user_op.max_fee_per_gas).to_string()
+    }
+
     pub async fn sign(&self, signer: &JsSigner) -> Result<SignedUserOperation, JsError> {
         self.inner
             .sign(signer.inner().as_ref())

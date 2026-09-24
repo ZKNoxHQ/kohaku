@@ -19,3 +19,12 @@ pub fn chain_config_mainnet() -> ChainConfig {
 pub fn chain_config_sepolia() -> ChainConfig {
     ChainConfig::sepolia()
 }
+
+/// Overrides a ChainConfig's POI endpoint. Useful in the browser to route POI
+/// requests through a same-origin proxy when the default endpoint is
+/// unreachable from the client (e.g. a broken-IPv6 host).
+#[wasm_bindgen(js_name = "withPoiEndpoint")]
+pub fn with_poi_endpoint(mut chain: ChainConfig, endpoint: String) -> ChainConfig {
+    chain.poi_endpoint = endpoint;
+    chain
+}

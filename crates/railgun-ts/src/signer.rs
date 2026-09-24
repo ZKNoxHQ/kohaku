@@ -89,3 +89,65 @@ impl JsRailgunSigner {
         self.inner.clone()
     }
 }
+
+/// Ledger-over-WebUSB constructor, browser-only. The spending key stays on the
+/// device; the viewing key is exported at connect and held in wasm memory.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_class = "RailgunSigner")]
+impl JsRailgunSigner {
+    /// Connect a Ledger over WebUSB and build a signer.
+    ///
+    /// Must be invoked from a user gesture (a click handler): browsers only
+    /// allow `navigator.usb.requestDevice` in response to one. Opens the device
+    /// picker, then prompts on-device for the spending pubkey and viewing key.
+    #[wasm_bindgen(js_name = "connectLedgerWebUsb")]
+    pub async fn connect_ledger_webusb(
+        #[wasm_bindgen(js_name = "accountIndex")] account_index: u32,
+        #[wasm_bindgen(js_name = "chainId")] chain_id: Option<u64>,
+    ) -> Result<JsRailgunSigner, JsError> {
+        let device = railgun_ledger::WebUsbLedger::connect()
+            .await
+            .map_err(|e| JsError::new(&format!("WebUSB: {e}")))?;
+
+        // The chain id is only the advisory field on the 0zk address; the signer
+        // identity itself is chain-agnostic.
+        let chain = match chain_id {
+            Some(id) => ChainId::evm(id),
+            None => ChainId::All,
+        };
+
+        let signer = railgun_ledger::LedgerSigner::connect(device, chain, account_index)
+            .await
+            .map_err(|e| JsError::new(&format!("Ledger: {e}")))?;
+
+        Ok(JsRailgunSigner { inner: signer })
+    }
+
+    /// Connect a Ledger over Web Bluetooth (Flex / Stax / Nano X) and build a
+    /// signer.
+    ///
+    /// Like [`Self::connect_ledger_webusb`], must be called from a user gesture:
+    /// browsers only allow `navigator.bluetooth.requestDevice` in response to
+    /// one. Shows the device picker, then prompts on-device for the spending
+    /// pubkey and viewing key.
+    #[wasm_bindgen(js_name = "connectLedgerWebBle")]
+    pub async fn connect_ledger_web_ble(
+        #[wasm_bindgen(js_name = "accountIndex")] account_index: u32,
+        #[wasm_bindgen(js_name = "chainId")] chain_id: Option<u64>,
+    ) -> Result<JsRailgunSigner, JsError> {
+        let device = railgun_ledger::WebBleLedger::connect()
+            .await
+            .map_err(|e| JsError::new(&format!("Web Bluetooth: {e}")))?;
+
+        let chain = match chain_id {
+            Some(id) => ChainId::evm(id),
+            None => ChainId::All,
+        };
+
+        let signer = railgun_ledger::LedgerSigner::connect(device, chain, account_index)
+            .await
+            .map_err(|e| JsError::new(&format!("Ledger: {e}")))?;
+
+        Ok(JsRailgunSigner { inner: signer })
+    }
+}
