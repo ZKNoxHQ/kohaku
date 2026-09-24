@@ -4,9 +4,7 @@
   "version": "0.11.0",
   "identifier": "com.zknox.railgunwallet",
   "build": {
-    "frontendDist": "dist",
-    "beforeBuildCommand": "sh scripts/build-dist.sh",
-    "beforeDevCommand": "sh scripts/build-dist.sh"
+    "frontendDist": "dist"
   },
   "app": {
     "withGlobalTauri": true,
