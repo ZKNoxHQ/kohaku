@@ -58,8 +58,13 @@ pub struct HealthReport {
 pub struct HealthParams {
     pub chain_id: u64,
     pub rpc_url: Option<String>,
-    /// nwaku REST root, e.g. http://127.0.0.1:8645; empty = skip the broadcaster probe
+    /// nwaku REST root, e.g. http://127.0.0.1:8645; when given it takes precedence
     pub waku_url: Option<String>,
+    /// Waku node for the broadcaster probe: "native" (the viewer's own Rust light node, when the
+    /// build has one), "tab" (the page's js-waku node) or "nwaku" (REST, with `waku_url`).
+    /// Absent: nwaku if a URL is given, else native when available, else the tab.
+    #[serde(default)]
+    pub waku_source: Option<String>,
     /// seconds spent listening for broadcaster fee messages (default 15)
     pub listen_secs: Option<u64>,
 }
@@ -162,7 +167,13 @@ fn http_client() -> reqwest::Client {
     }
 }
 
-pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> HealthReport {
+/// `bridge`: client over the page's js-waku node; `native`: client over the viewer's own Rust light
+/// node (`LightNodeTransport`, daemon only). The chosen one is kept by the caller between runs.
+pub async fn run(
+    p: HealthParams,
+    bridge: Option<Arc<BroadcasterClient>>,
+    native: Option<Arc<BroadcasterClient>>,
+) -> HealthReport {
     let chain = ChainConfig::from_chain_id(p.chain_id);
     let client = http_client();
 
@@ -363,28 +374,46 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
         }
     };
 
-    // ---- broadcasters (Waku fee messages): nwaku REST when a URL is given, else the tab's node ----
+    // ---- broadcasters (Waku fee messages): nwaku REST when a URL is given, else the viewer's
+    // Rust node or the tab's js-waku node ----
     let listen = p.listen_secs.unwrap_or(15).clamp(2, 90);
     let fee_token = chain
         .as_ref()
         .map(|c| format!("{:?}", c.wrapped_base_token).to_ascii_lowercase())
         .unwrap_or_default();
     let nwaku_url = p.waku_url.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(str::to_string);
-    let (bc, source): (Option<Arc<BroadcasterClient>>, &str) = match (&nwaku_url, &bridge) {
+    let tab = |b: &Option<Arc<BroadcasterClient>>| match b {
+        Some(b) => (Some(b.clone()), "tab"),
+        None => (None, "none"),
+    };
+    let (bc, source): (Option<Arc<BroadcasterClient>>, &str) = match (&nwaku_url, p.waku_source.as_deref()) {
         (Some(url), _) => (Some(Arc::new(BroadcasterClient::new(Arc::new(NwakuRest::new(url.clone())), p.chain_id))), "nwaku"),
-        (None, Some(b)) => (Some(b.clone()), "tab"),
-        (None, None) => (None, "none"),
+        (None, Some("tab")) => tab(&bridge),
+        (None, _) => match &native {
+            Some(n) => (Some(n.clone()), "native"),
+            None => tab(&bridge),
+        },
     };
     let broadcasters = match bc {
         None => Probe {
             level: "skip",
-            summary: "no Waku node: give an nwaku URL or open the Network tab".into(),
+            summary: "no Waku node: choose one in the Network tab or give an nwaku URL".into(),
             ..Default::default()
         },
         Some(bc) => {
-            let url = nwaku_url.clone().unwrap_or_else(|| "tab".into());
+            let url = nwaku_url.clone().unwrap_or_else(|| source.to_string());
             let t0 = Instant::now();
-            match bc.subscribe().await {
+            let mut subscribed = bc.subscribe().await;
+            if source == "native" {
+                // the first call starts the node, which answers "not ready" until it has dialled
+                // the fleet and opened its filter subscriptions (a few seconds): retry for a minute
+                let deadline = Instant::now() + std::time::Duration::from_secs(60);
+                while subscribed.is_err() && Instant::now() < deadline {
+                    sleep_ms(1000).await;
+                    subscribed = bc.subscribe().await;
+                }
+            }
+            match subscribed {
                 Err(e) => {
                     let msg = e.to_string();
                     let local = msg.contains("error sending request") || msg.contains("unreachable") || msg.contains("connection refused");
@@ -393,6 +422,8 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
                         latency_ms: Some(t0.elapsed().as_millis() as u64),
                         summary: if local {
                             format!("no nwaku node reachable at {url}: broadcaster probe skipped")
+                        } else if source == "native" {
+                            "the viewer's Waku node could not subscribe within a minute".into()
                         } else {
                             "subscribe failed".into()
                         },
@@ -401,10 +432,11 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
                     }
                 }
                 Ok(()) => {
-                    // the tab's node needs up to a minute after opening the tab: wait for peers
-                    // before the listen window instead of reporting an empty network
+                    // the tab's node needs up to a minute after opening the tab, the viewer's node a
+                    // few seconds on its first run: wait for peers before the listen window instead
+                    // of reporting an empty network
                     let mut waited = 0u64;
-                    if source == "tab" {
+                    if source == "tab" || source == "native" {
                         while waited < 60 {
                             if matches!(bc.peer_count().await, Some(n) if n > 0) {
                                 break;
@@ -421,7 +453,11 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
                             Ok(n) => received += n,
                             Err(e) => {
                                 pump_err = Some(e.to_string());
-                                break;
+                                // the Rust node reconnects by itself when a fleet node drops it:
+                                // keep listening instead of ending the window on the first gap
+                                if source != "native" {
+                                    break;
+                                }
                             }
                         }
                         sleep_ms(500).await;
@@ -446,8 +482,12 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
                         }))
                         .collect();
                     let tab_offline = source == "tab" && peers.is_none() && received == 0 && signers.is_empty();
+                    let native_offline =
+                        source == "native" && peers.unwrap_or(0) == 0 && received == 0 && signers.is_empty();
                     let level = if tab_offline {
                         "skip"
+                    } else if native_offline {
+                        "down"
                     } else if pump_err.is_some() && signers.is_empty() {
                         "down"
                     } else if signers.is_empty() || usable_base == 0 {
@@ -460,6 +500,11 @@ pub async fn run(p: HealthParams, bridge: Option<Arc<BroadcasterClient>>) -> Hea
                         latency_ms: Some(t0.elapsed().as_millis() as u64),
                         summary: if tab_offline {
                             "the tab's Waku node found no peer within a minute (see the status line above)".into()
+                        } else if native_offline {
+                            format!(
+                                "the viewer's Waku node found no peer within a minute{}",
+                                pump_err.as_ref().map(|e| format!(": {e}")).unwrap_or_default()
+                            )
                         } else {
                             format!(
                                 "{} broadcaster(s) · {} usable quote(s) for the base token · {} message(s) in {listen}s · peers {} · via {source}",

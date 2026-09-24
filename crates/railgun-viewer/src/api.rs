@@ -36,6 +36,9 @@ pub struct AppState {
     pub bridge: Arc<BrowserBridge>,
     /// One broadcaster client per chain over that bridge, created on first use.
     pub bridge_clients: Arc<Mutex<HashMap<u64, Arc<BroadcasterClient>>>>,
+    /// One broadcaster client per chain over the viewer's own Rust Waku light node
+    /// (`LightNodeTransport`). The node starts on the first probe and stays connected.
+    pub native_clients: Arc<Mutex<HashMap<u64, Arc<BroadcasterClient>>>>,
 }
 
 impl AppState {
@@ -44,6 +47,17 @@ impl AppState {
         map.entry(chain_id)
             .or_insert_with(|| {
                 let transport: Arc<dyn WakuTransport> = self.bridge.clone();
+                Arc::new(BroadcasterClient::new(transport, chain_id))
+            })
+            .clone()
+    }
+
+    pub fn native_client(&self, chain_id: u64) -> Arc<BroadcasterClient> {
+        let mut map = self.native_clients.lock().expect("native clients");
+        map.entry(chain_id)
+            .or_insert_with(|| {
+                let transport: Arc<dyn WakuTransport> =
+                    Arc::new(railgun_broadcaster::LightNodeTransport::for_chain(chain_id));
                 Arc::new(BroadcasterClient::new(transport, chain_id))
             })
             .clone()
@@ -107,7 +121,7 @@ async fn waku_bundle() -> impl IntoResponse {
 }
 
 async fn defaults() -> Json<Value> {
-    Json(waku_link::defaults())
+    Json(waku_link::defaults(true))
 }
 
 /// One round trip of the tab's Waku node, as in the wallet: received messages in, publishes out.
@@ -150,8 +164,9 @@ async fn health_run(State(st): State<AppState>, Json(p): Json<HealthParams>) -> 
     }
     let shared = st.shared.clone();
     let bridge = st.bridge_client(p.chain_id);
+    let native = st.native_client(p.chain_id);
     tokio::spawn(async move {
-        let report = health::run(p, Some(bridge)).await;
+        let report = health::run(p, Some(bridge), Some(native)).await;
         if let Ok(mut s) = shared.lock() {
             s.health = serde_json::to_value(&report).ok();
             s.health_running = false;

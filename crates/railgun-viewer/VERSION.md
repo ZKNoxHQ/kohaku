@@ -1,5 +1,18 @@
 # railgun-viewer — journal des versions
 
+## 0.2.19 — 2026-09-24
+
+### Corrigé
+- Sonde des broadcasters par le nœud Rust en `down` immédiat (« native Waku node not ready: 0 peer(s)… », 1 ms) : le premier `subscribe` démarre le nœud et répond « pas prêt » tant qu'il n'a pas composé la flotte ni ouvert ses abonnements filter. Il est maintenant relancé chaque seconde pendant une minute au plus (l'ajout de topics est idempotent). Pendant la fenêtre d'écoute, une erreur de `poll` du nœud Rust (pair de la flotte perdu, reconnexion automatique) ne clôt plus la fenêtre. Le détail de la carte indique la source (`native`, `tab`) au lieu de `tab` pour tout ce qui n'était pas nwaku.
+
+## 0.2.18 — 2026-09-24
+
+### Ajouté
+- Onglet Network : sonde des broadcasters par le nœud Waku Rust du viewer (`LightNodeTransport`, feature `light-node` du broadcaster 0.7.0, même nœud que le mode natif du wallet 0.13), choix par défaut. Le nœud démarre à la première vérification et reste connecté (un client par chaîne dans `AppState::native_clients`) ; attente des pairs jusqu'à une minute comme pour l'onglet ; niveau `down` s'il n'en trouve aucun.
+- Sélecteur « Waku node » : « in the viewer (Rust) » ou « this tab (js-waku) » ; le champ nwaku REST reste prioritaire quand il est rempli. Le nœud js-waku de la page ne démarre plus qu'en mode onglet (ouverture de l'onglet, changement de réseau, changement de source).
+- `/api/defaults` expose `nativeWaku` (daemon : oui) ; sans lui, le front retire le choix Rust et revient à l'onglet.
+- `HealthParams::waku_source` (`native` | `tab` | `nwaku`) ; absent : nwaku si une URL est donnée, sinon le nœud Rust s'il existe, sinon l'onglet. `health::run` prend les deux clients (onglet, natif). Voir ADR-013.
+
 ## 0.2.17 — 2026-09-24
 
 Rebase sur `zknox/railgun-integration` (ZKNoxHQ/kohaku : signer Ledger de Simon, Waku Rust, Android, wallet 0.13.0), branche `zknox/dr-rail`. Aucun changement de comportement.

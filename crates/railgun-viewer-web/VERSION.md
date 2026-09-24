@@ -1,5 +1,13 @@
 # railgun-viewer-web — journal des versions
 
+## 0.1.3 — 2026-09-24
+
+- Nœud Waku Rust dans le Web Worker : `LightNodeTransport` (feature `light-node` du broadcaster 0.7.0, waku-light 0.4.1 sur le WebSocket du navigateur), un client par chaîne gardé entre les vérifications. `/api/defaults` répond `nativeWaku: true` : l'onglet Network propose le nœud Rust par défaut, comme le daemon, et js-waku dans la page reste en secours. Même code de sonde que le viewer 0.2.19 (attente de l'abonnement, fenêtre tolérante aux trous).
+
+## 0.1.2 — 2026-09-24
+
+- Suit le viewer 0.2.18 (fichiers partagés) : `health::run(p, bridge, None)`, `/api/defaults` avec `nativeWaku: false`, donc le front garde le nœud js-waku de la page. Le nœud Rust dans le worker viendra à l'étape suivante.
+
 ## 0.1.1 — 2026-09-24
 
 - Rebase sur `zknox/railgun-integration` avec le viewer 0.2.17 : `signer.rs` (inclus par `#[path]`) implémente le trait async de la base, dépendance `async-trait` ajoutée. `railgun-broadcaster` 0.7.0 de la base (wasm natif) à la place de la 0.6.2.

@@ -1,6 +1,6 @@
 [package]
 name = "railgun-viewer-web"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2024"
 description = "Dr Rail as a static web page: the railgun-viewer session core compiled to wasm and run in a Web Worker"
 publish = false
@@ -24,7 +24,7 @@ hmac = "0.12"
 js-sys = { workspace = true }
 kohaku-db = { workspace = true }
 railgun = { workspace = true }
-railgun-broadcaster = { path = "../railgun-broadcaster" }
+railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }

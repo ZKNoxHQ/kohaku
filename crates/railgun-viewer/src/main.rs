@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
         data_dir: Arc::new(args.data_dir.display().to_string()),
         bridge: Arc::new(railgun_broadcaster::BrowserBridge::new()),
         bridge_clients: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        native_clients: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     let listener = tokio::net::TcpListener::bind(addr)
         .await

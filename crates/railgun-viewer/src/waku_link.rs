@@ -5,9 +5,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use railgun_broadcaster::{BrowserBridge, PublishAck, RemoteStatus, transport::WakuMessage};
 use serde_json::{Value, json};
 
-/// Same shape as the wallet's `/api/defaults`, the part the page's Waku node needs.
-pub fn defaults() -> Value {
+/// Same shape as the wallet's `/api/defaults`: the part the page's Waku node needs, and whether
+/// this build has its own Rust light node (`native_waku`: the daemon yes, the web build not yet).
+pub fn defaults(native_waku: bool) -> Value {
     json!({
+        "nativeWaku": native_waku,
         "waku": {
             "clusterId": railgun_broadcaster::wire::CLUSTER_ID,
             "shardId": railgun_broadcaster::wire::SHARD_ID,

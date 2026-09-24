@@ -56,6 +56,9 @@ thread_local! {
     static TX: RefCell<Option<mpsc::UnboundedSender<Command>>> = const { RefCell::new(None) };
     static BRIDGE: Arc<BrowserBridge> = Arc::new(BrowserBridge::new());
     static CLIENTS: RefCell<HashMap<u64, Arc<BroadcasterClient>>> = RefCell::new(HashMap::new());
+    /// One broadcaster client per chain over the Rust Waku light node running in this worker
+    /// (waku-light over the browser's WebSocket). The node starts on the first probe and stays up.
+    static NATIVE: RefCell<HashMap<u64, Arc<BroadcasterClient>>> = RefCell::new(HashMap::new());
 }
 
 fn shared_ref() -> SharedRef {
@@ -313,6 +316,19 @@ fn bridge_client(chain_id: u64) -> Arc<BroadcasterClient> {
     })
 }
 
+fn native_client(chain_id: u64) -> Arc<BroadcasterClient> {
+    NATIVE.with(|c| {
+        c.borrow_mut()
+            .entry(chain_id)
+            .or_insert_with(|| {
+                let transport: Arc<dyn WakuTransport> =
+                    Arc::new(railgun_broadcaster::LightNodeTransport::for_chain(chain_id));
+                Arc::new(BroadcasterClient::new(transport, chain_id))
+            })
+            .clone()
+    })
+}
+
 fn ok_or_error(r: Result<()>) -> Value {
     match r {
         Ok(()) => json!({ "ok": true }),
@@ -378,8 +394,9 @@ async fn route(method: &str, path: &str, body: &str) -> Value {
                 s.updated_at = now_ms();
             }
             let client = bridge_client(p.chain_id);
+            let native = native_client(p.chain_id);
             spawn_local(async move {
-                let report = health::run(p, Some(client)).await;
+                let report = health::run(p, Some(client), Some(native)).await;
                 if let Ok(mut s) = sh.lock() {
                     s.health = serde_json::to_value(&report).ok();
                     s.health_running = false;
@@ -392,7 +409,7 @@ async fn route(method: &str, path: &str, body: &str) -> Value {
             });
             json!({ "ok": true })
         }
-        (_, "/api/defaults") => waku_link::defaults(),
+        (_, "/api/defaults") => waku_link::defaults(true),
         ("POST", "/api/waku/exchange") => match parse::<waku_link::ExchangeBody>(body) {
             Ok(b) => BRIDGE.with(|br| waku_link::exchange(br, b)),
             Err(e) => json!({ "ok": false, "error": format!("{e:#}") }),

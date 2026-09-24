@@ -1,5 +1,18 @@
 # railgun-viewer — décisions d'architecture
 
+## ADR-013 — Waku Rust par défaut pour la sonde des broadcasters
+
+Contexte : la sonde passait par le nœud js-waku de la page (ou un nwaku REST). Le wallet 0.13 a
+un nœud Waku Rust natif (`waku-light` via `LightNodeTransport`), validé en réception et en light push.
+
+Décision : le daemon du viewer démarre le même nœud (un par chaîne, gardé entre les vérifications)
+et s'en sert par défaut ; js-waku reste en secours dans le sélecteur, et le bundle n'est chargé
+qu'en mode onglet. `/api/defaults.nativeWaku` dit si le build a ce nœud : la version web répond
+non pour l'instant et garde js-waku, jusqu'au passage de `waku-light` (wasm) dans son worker.
+
+Amendement (viewer web 0.1.3) : la version web a désormais le même nœud, `waku-light` compilé en
+wasm dans son Web Worker (WebSocket du navigateur), et répond `nativeWaku: true`.
+
 ## ADR-012 — Version web statique : mêmes sources, moteur wasm dans un Web Worker, front inchangé
 
 Contexte : mettre Dr Rail en ligne sans serveur. Le SDK compile déjà en wasm (feature `js`,
