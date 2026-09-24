@@ -16,7 +16,7 @@ use crate::{
         aes::AesError,
         keys::{
             BlindedKey, ByteKey, KeyError, MasterPublicKey, NullifyingKey, SpendingPublicKey,
-            U256Key, ViewingPublicKey,
+            U256Key, ViewingKey, ViewingPublicKey,
         },
     },
     indexer::syncer,
@@ -214,6 +214,7 @@ fn note_hash(note_public_key: U256, asset: AssetId, value: u128) -> UtxoLeafHash
         .into()
 }
 
+#[allow(dead_code)]
 fn note_public_key(
     spending_pubkey: SpendingPublicKey,
     nullifying_key: NullifyingKey,
@@ -226,6 +227,35 @@ fn note_public_key(
 /// ZKNOX fork: `npk = poseidon(masterPublicKey, random)`.
 pub fn note_public_key_from_master(master_key: MasterPublicKey, random: &[u8; 16]) -> U256 {
     poseidon_hash(&[master_key.to_u256(), U256::from_be_slice(random)]).unwrap()
+}
+
+/// ZKNOX viewer: the receiver master public key carried by a transact note, when the note is
+/// ours and the sender left that key in clear (kohaku wallets always do; the Railgun engine does
+/// unless the sender reveals itself, in which case the field is XORed with the sender key and
+/// this returns `None`). The key is only returned if it reproduces the on-chain commitment hash.
+pub fn discover_master_key(
+    viewing_key: ViewingKey,
+    transact: &syncer::Transact,
+) -> Option<MasterPublicKey> {
+    let blinded_sender = BlindedKey::from_bytes(transact.blinded_sender_viewing_key);
+    let shared_key = viewing_key.derive_shared_key_blinded(blinded_sender).ok()?;
+    let bundle = shared_key.decrypt_gcm(&transact.ciphertext).ok()?;
+    if bundle.len() < 3 || bundle[0].len() != 32 || bundle[1].len() != 32 || bundle[2].len() != 32 {
+        return None;
+    }
+    let token_data = TokenData::from_hash(&bundle[1]).ok()?;
+    let asset_id = AssetId::from(token_data);
+    let mut random = [0u8; 16];
+    random.copy_from_slice(&bundle[2][..16]);
+    let mut value_bytes = [0u8; 16];
+    value_bytes.copy_from_slice(&bundle[2][16..]);
+    let value = u128::from_be_bytes(value_bytes);
+    let mut mpk_bytes = [0u8; 32];
+    mpk_bytes.copy_from_slice(&bundle[0]);
+    let master = MasterPublicKey::from_bytes(mpk_bytes);
+    let npk = note_public_key_from_master(master, &random);
+    let hash: U256 = note_hash(npk, asset_id, value).into();
+    (hash == transact.hash).then_some(master)
 }
 
 pub fn blinded_commitment(hash: U256, npk: U256, tree_number: u32, leaf_index: u32) -> U256 {

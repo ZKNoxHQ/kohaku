@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.12.1 (2026-09-23)
+
+First legacy send in native mode: the request was published and the wallet then waited, with
+nothing in the log to say whether any Waku peer had taken it.
+
+* The front log now carries the native node's own events (`waku_light`: peers connected and
+  lost, filter subscriptions, dial failures) and one line per light push with the number of peers
+  that accepted it.
+* After a broadcaster time-out, the delivery count is reported in native mode too
+  ("publishes by the native node: N accepted by a Waku peer, M failed"), from the transport's
+  counters instead of the tab bridge only. A request no peer accepted no longer marks the
+  broadcaster as silent, and the closing message points at the node rather than at the tab.
+
+## 0.12.0 (2026-09-23)
+
+Waku mode "native", the new default: the legacy transport's Waku node runs inside the daemon
+(`railgun-broadcaster::LightNodeTransport` on `waku-light`, rust-libp2p) instead of js-waku in
+the wallet tab. No tab to keep open, no JavaScript on that path.
+
+* Unlock form: "Native, inside the wallet" first in the Waku node list. A stored "browser" choice
+  is switched to "native" once; choosing "browser" again afterwards sticks.
+* Engine: `waku_mode` absent, empty or "native" gives the native node when the build has the
+  `native-waku` feature (default); without it (the Android crate builds with
+  `default-features = false`) it falls back to "browser", with a warning in the log, so the
+  mobile app behaves as in 0.11. "browser" and "nwaku" are unchanged.
+* `/api/defaults` reports `nativeWaku`; the front removes the option when the build lacks it.
+* Status texts for the native mode (connecting, not ready with the node's last error).
+* Measured against the fleet before this release (`light_fees` example, Sepolia): the node
+  subscribes to 2 or 3 fleet nodes in 5 to 30 s, and the four Railway trusted signers' rates and
+  the offers of four broadcasters arrive as with the tab's node.
+* Known: a fleet node sometimes closes the connection once, 10 to 45 s after it opened; the node
+  reconnects and subscribes again within about 12 s. Under watch.
+
 ## 0.10.1 (2026-09-21)
 
 * Default gas margin of "prove once" lowered from 25% to 12%. Four live runs on Sepolia

@@ -74,6 +74,10 @@ pub struct Input {
     pub commitment_refs: HashMap<String, ChainRef>,
     pub nullifier_refs: HashMap<String, ChainRef>,
     pub unshields: Vec<UnshieldRef>,
+    /// railgun txid -> list -> status of the unshield output (probed with its own blinded commitment)
+    pub unshield_statuses: HashMap<String, BTreeMap<String, String>>,
+    /// railgun txids the SDK recovery pass saw as `Valid` on the node
+    pub recovered_valid: HashSet<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -140,6 +144,8 @@ pub struct TxView {
     pub poi_submitted: bool,
     pub poi_missing_lists: Vec<String>,
     pub poi_pending: bool,
+    /// What the POI verdict was built from (shown in the detail panel).
+    pub debug: Value,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -385,10 +391,44 @@ pub fn build(input: &Input) -> History {
                 }
             }
         }
+        // the unshield output has its own blinded commitment on the node
+        if let Some(m) = input.unshield_statuses.get(&op.railgun_txid) {
+            for (list, st) in m {
+                let cur = pois.entry(list.clone()).or_insert_with(|| "Unknown".into());
+                if rank(st) < rank(cur) || cur == "Unknown" {
+                    *cur = st.clone();
+                }
+            }
+        }
+        // the SDK recovery pass already saw this operation as Valid
+        let recovered = input.recovered_valid.contains(&norm(&op.railgun_txid));
+        if recovered {
+            for k in &input.list_keys {
+                let cur = pois.entry(k.clone()).or_insert_with(|| "Unknown".into());
+                if cur != "Valid" {
+                    *cur = "Valid".into();
+                }
+            }
+            if input.list_keys.is_empty() && pois.is_empty() {
+                pois.insert("*".into(), "Valid".into());
+            }
+        }
         for k in &input.list_keys {
             pois.entry(k.clone()).or_insert_with(|| "Unknown".into());
         }
         let poi_submitted = pois.values().any(|s| s == "Valid" || s == "ProofSubmitted");
+        let debug = json!({
+            "opNullifiers": op.nullifiers,
+            "matchedInputs": inputs,
+            "opCommitments": op.commitments,
+            "matchedOutputs": outputs.iter().map(|h| {
+                let n = note_by_hash[h.as_str()];
+                json!({"hash": h, "origin": n.origin, "blinded": n.blinded, "pois": n.pois})
+            }).collect::<Vec<_>>(),
+            "unshieldStatuses": input.unshield_statuses.get(&op.railgun_txid),
+            "recoveredValid": recovered,
+            "listKeys": input.list_keys,
+        });
         let poi_missing_lists: Vec<String> = pois
             .iter()
             .filter(|(_, s)| s.as_str() != "Valid" && s.as_str() != "ProofSubmitted")
@@ -433,6 +473,7 @@ pub fn build(input: &Input) -> History {
             poi_submitted,
             poi_missing_lists,
             poi_pending: pending_txids.contains(&norm(&op.railgun_txid)),
+            debug,
         });
     }
     // shields and third-party receipts: one entry per note without an own operation
@@ -499,6 +540,7 @@ pub fn build(input: &Input) -> History {
             poi_submitted: n.pois.values().any(|s| s == "Valid" || s == "ProofSubmitted"),
             poi_missing_lists: vec![],
             poi_pending: false,
+            debug: json!({"note": n.hash, "blinded": n.blinded, "pois": n.pois}),
         });
     }
     txs.sort_by(|a, b| {
@@ -524,7 +566,7 @@ pub fn build(input: &Input) -> History {
             } else if t.outputs.is_empty() {
                 "no decryptable output to prove (outputs to third parties only?)".into()
             } else if t.pois.values().all(|s| s == "Unknown") {
-                "no status known yet: run a sync with POI enabled".into()
+                "no status known: the node did not answer for any output (see debug)".into()
             } else {
                 "no ProofSubmitted/Valid status on any output: proof never submitted".into()
             },

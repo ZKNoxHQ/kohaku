@@ -309,3 +309,20 @@ Known property of RelayAdapt, not introduced here: with `requireSuccess = false`
 `transfer` leaves the unwrapped currency on the RelayAdapt contract, where the next caller can
 take it. The transfer of native currency to an address only fails if the recipient is a contract
 that rejects it. The direct transport uses `requireSuccess = true`.
+
+## ADR-032: the legacy transport's Waku node moves into the daemon
+
+The js-waku node of the tab (ADR on the browser bridge) worked but tied the legacy transport to
+an open tab and to a JavaScript bundle built from npm. `waku-light` does the same work natively
+and was validated against the fleet before being wired in. It becomes the default; the tab's node
+and a local nwaku stay selectable, so a regression can be worked around from the unlock form
+without a new build.
+
+The switch is a Cargo feature of the wallet, on by default, off for the Android crate: that crate
+builds its APK in CI for a target where libp2p and its TLS stack have not been built yet, and its
+Waku node lives in the WebView under a foreground service (ADR-028). Without the feature, the
+native mode maps to the page's node instead of failing the unlock, which also covers a front
+cached from 0.12 talking to an older build. Enabling it on Android is a later, separate step.
+
+The js-waku bundle and `/api/waku/exchange` stay in this release; they go once the native mode
+has run a few days.

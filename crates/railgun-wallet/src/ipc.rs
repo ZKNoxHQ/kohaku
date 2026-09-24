@@ -82,6 +82,7 @@ fn parse<T: serde::de::DeserializeOwned>(body: Option<Value>) -> Result<T, ApiEr
 pub fn defaults() -> Value {
     json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "nativeWaku": crate::engine::NATIVE_WAKU,
         "waku": {
             "clusterId": railgun_broadcaster::wire::CLUSTER_ID,
             "shardId": railgun_broadcaster::wire::SHARD_ID,

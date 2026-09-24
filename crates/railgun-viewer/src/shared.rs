@@ -18,6 +18,12 @@ pub struct Shared {
     /// Last history + graph snapshot produced by the engine.
     pub snapshot: Option<Value>,
     pub updated_at: u64,
+    /// Last network health report (independent of the wallet).
+    pub health: Option<Value>,
+    pub health_running: bool,
+    /// What the engine is doing right now (unlocking, discovering master key…), if anything.
+    pub stage: Option<&'static str>,
+    pub stage_detail: Option<String>,
 }
 
 pub type SharedRef = Arc<Mutex<Shared>>;
@@ -40,13 +46,42 @@ pub struct StatusView {
     pub last_error: Option<String>,
     pub log: Vec<String>,
     pub updated_at: u64,
+    pub stage: Option<&'static str>,
+    pub stage_detail: Option<String>,
+}
+
+pub fn status_view(shared: &SharedRef, version: &'static str, data_dir: String) -> StatusView {
+    let s = shared.lock().expect("shared");
+    StatusView {
+        version,
+        data_dir,
+        unlocked: s.unlocked,
+        syncing: s.syncing,
+        address: s.address.clone(),
+        mode: s.mode,
+        chain_id: s.chain_id,
+        synced_block: s.synced_block,
+        last_error: s.last_error.clone(),
+        log: s.log.clone(),
+        updated_at: s.updated_at,
+        stage: s.stage,
+        stage_detail: s.stage_detail.clone(),
+    }
 }
 
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or_default()
+    // `SystemTime::now` panics on wasm32-unknown-unknown.
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or_default()
+    }
 }
 
 pub fn log(shared: &SharedRef, line: impl Into<String>) {

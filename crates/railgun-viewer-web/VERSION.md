@@ -1,0 +1,19 @@
+# railgun-viewer-web — journal des versions
+
+## 0.1.0 — 2026-09-23
+
+Première version : Dr Rail en site statique, sans serveur.
+
+### Ajouté
+- Crate `railgun-viewer-web` (cdylib wasm-bindgen) sur les sources du viewer 0.2.16 incluses par `#[path]` et `railgun-wallet/src/keys.rs` ; point d'entrée unique `api(method, path, body)` servant les mêmes routes que le daemon (`status`, `snapshot`, `unlock`, `sync`, `refresh`, `lock`, `derive`, `health`, `health/run`, `defaults`, `waku/exchange`).
+- Acteur de commandes identique au daemon (unlock répond après le contrôle des clés puis poursuit, sync, refresh, lock), dans une tâche `spawn_local`.
+- Base du SDK (`JsDatabase`) et cache du viewer en IndexedDB (`js/idb.js`), base `drrail-<chaîne>-<sha256(adresse)[..8]>`.
+- Web Worker (`web/worker.js`) hébergeant le wasm, routeur `fetch` du front (`web/shim.js`), page générée depuis le front du viewer (`web/make_index.py` : shim en tête, chemin relatif du bundle Waku, mention d'exécution locale).
+- `build.sh` (cargo, wasm-bindgen, wasm-opt si présent) et workflow `.github/workflows/dr-rail-web.yml` (GitHub Pages + artefact `dr-rail-web`).
+
+### Vérifié
+- Préflight CORS (origine tierce, POST, `content-type`) acceptés par ppoi.fdi.network, le subsquid Sepolia et publicnode (`access-control-allow-origin: *`).
+- `cargo check --target wasm32-unknown-unknown -p railgun-viewer-web` sans erreur ni warning ; build release et wasm-bindgen 0.2.108.
+
+### Non validé
+- Parcours complet dans un navigateur (unlock, scan, POI, onglet Network).

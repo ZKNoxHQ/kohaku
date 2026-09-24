@@ -8,11 +8,9 @@
 //! transport reports itself unreachable instead of queueing forever: a transact request is only
 //! worth sending within the validity of its fee quote.
 
-use std::{
-    collections::VecDeque,
-    sync::Mutex,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, sync::Mutex, time::Duration};
+
+use web_time::Instant;
 
 use async_trait::async_trait;
 
@@ -143,7 +141,9 @@ impl BrowserBridge {
     }
 }
 
-#[async_trait]
+// reqwest's fetch futures are not `Send` on wasm32 (web build of the viewer)
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl WakuTransport for BrowserBridge {
     async fn subscribe(&self) -> Result<(), TransportError> {
         // The remote node subscribes on its own; this only reports whether it is there.
@@ -174,5 +174,9 @@ impl WakuTransport for BrowserBridge {
 
     async fn peer_count(&self) -> Option<usize> {
         Some(self.state.lock().unwrap().remote.peers)
+    }
+
+    fn publish_stats(&self) -> Option<PublishStats> {
+        Some(BrowserBridge::publish_stats(self))
     }
 }

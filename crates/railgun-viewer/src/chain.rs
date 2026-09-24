@@ -4,9 +4,11 @@
 use std::collections::HashMap;
 
 use alloy::{
-    primitives::{Address, U256},
-    providers::DynProvider,
+    primitives::{Address, B256, U256},
+    providers::{DynProvider, Provider},
+    rpc::types::{BlockNumberOrTag, Filter, Log},
     sol,
+    sol_types::SolEvent,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -18,6 +20,78 @@ sol! {
         function decimals() external view returns (uint8);
         function symbol() external view returns (string);
     }
+}
+
+sol! {
+    /// Railgun V2 `RailgunLogic` events needed here.
+    struct RailgunTokenData {
+        uint8 tokenType;
+        address tokenAddress;
+        uint256 tokenSubID;
+    }
+    event Unshield(address to, RailgunTokenData token, uint256 amount, uint256 fee);
+}
+
+/// RPC fallback for one operation: the Railgun contract logs of its block, the transaction whose
+/// logs carry one of our nullifiers, and its `Unshield` events. Independent of the subsquid
+/// schema; one `eth_getLogs` and one `eth_getBlockByNumber` per operation.
+pub async fn op_from_logs(
+    provider: &DynProvider,
+    contract: Address,
+    block: u64,
+    nullifiers: &[String],
+) -> Option<OpRef> {
+    let nf_bytes: Vec<[u8; 32]> = nullifiers
+        .iter()
+        .filter_map(|n| {
+            let b = hex::decode(n.trim_start_matches("0x")).ok()?;
+            b.try_into().ok()
+        })
+        .collect();
+    if nf_bytes.is_empty() {
+        return None;
+    }
+    let filter = Filter::new().address(contract).from_block(block).to_block(block);
+    let logs: Vec<Log> = match provider.get_logs(&filter).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("eth_getLogs at block {block} failed: {e}");
+            return None;
+        }
+    };
+    let mut by_tx: HashMap<B256, Vec<&Log>> = HashMap::new();
+    for l in &logs {
+        if let Some(h) = l.transaction_hash {
+            by_tx.entry(h).or_default().push(l);
+        }
+    }
+    let (tx_hash, tx_logs) = by_tx.iter().find(|(_, ls)| {
+        ls.iter().any(|l| {
+            let d: &[u8] = l.data().data.as_ref();
+            nf_bytes.iter().any(|nb| d.windows(32).any(|w| w == nb))
+        })
+    })?;
+    let mut op = OpRef {
+        transaction_hash: format!("{tx_hash:#x}"),
+        block_number: block,
+        nullifiers: nullifiers.to_vec(),
+        ..Default::default()
+    };
+    for l in tx_logs {
+        if let Ok(ev) = Unshield::decode_log_data(l.data()) {
+            op.has_unshield = true;
+            op.unshield_to = Some(format!("{:#x}", ev.to));
+            op.unshield_token = Some(format!("{:#x}", ev.token.tokenAddress));
+            op.unshield_value = Some((ev.amount + ev.fee).to_string());
+        }
+    }
+    op.timestamp = provider
+        .get_block_by_number(BlockNumberOrTag::Number(block))
+        .await
+        .ok()
+        .flatten()
+        .map(|b| b.header.timestamp);
+    Some(op)
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, Deserialize)]
@@ -56,10 +130,30 @@ pub struct UnshieldRef {
     pub event_log_index: Option<u64>,
 }
 
-/// Subsquid lookups, best effort: any failure leaves the entry absent.
+/// One Railgun operation as the subsquid `Transaction` entity records it. This is the same
+/// entity the SDK's txid indexer reads; it also carries the chain hash, the timestamp and the
+/// unshield preimage, which the SDK drops.
+#[derive(Clone, Debug, Default, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpRef {
+    pub transaction_hash: String,
+    pub block_number: u64,
+    pub timestamp: Option<u64>,
+    pub nullifiers: Vec<String>,
+    pub commitments: Vec<String>,
+    pub has_unshield: bool,
+    pub unshield_to: Option<String>,
+    pub unshield_token: Option<String>,
+    /// gross value of the unshield preimage (amount + fee), decimal string
+    pub unshield_value: Option<String>,
+}
+
+/// Subsquid lookups, best effort: any failure leaves the entry absent and is reported through
+/// `errors()` so the UI log shows it.
 pub struct Squid {
     client: reqwest::Client,
     endpoint: String,
+    errors: std::sync::Mutex<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -113,9 +207,44 @@ struct SquidUnshield {
 struct SquidToken {
     token_address: Option<String>,
 }
+#[derive(Deserialize)]
+struct TransactionsData {
+    transactions: Vec<SquidTransaction>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SquidTransaction {
+    transaction_hash: String,
+    block_number: String,
+    block_timestamp: Option<String>,
+    #[serde(default)]
+    nullifiers: Vec<String>,
+    #[serde(default)]
+    commitments: Vec<String>,
+    #[serde(default)]
+    has_unshield: Option<bool>,
+    #[serde(default)]
+    unshield_to_address: Option<String>,
+    #[serde(default)]
+    unshield_token: Option<SquidToken>,
+    #[serde(default)]
+    unshield_value: Option<String>,
+}
 
 fn parse_u64(s: &str) -> Option<u64> {
     s.trim().parse::<u64>().ok()
+}
+
+/// Hex (`0x…`) or decimal string -> `0x` + 64 hex digits.
+fn norm_any(s: &str) -> String {
+    let t = s.trim();
+    if t.starts_with("0x") || t.starts_with("0X") {
+        return norm_hex(t);
+    }
+    match U256::from_str_radix(t, 10) {
+        Ok(v) => format!("0x{v:064x}"),
+        Err(_) => norm_hex(t),
+    }
 }
 
 fn norm_hex(s: &str) -> String {
@@ -137,7 +266,62 @@ impl Squid {
         Self {
             client: reqwest::Client::new(),
             endpoint: endpoint.into(),
+            errors: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    fn report(&self, what: &str, e: &anyhow::Error) {
+        tracing::warn!("subsquid {what} lookup failed: {e:#}");
+        if let Ok(mut v) = self.errors.lock() {
+            v.push(format!("subsquid {what}: {e:#}"));
+        }
+    }
+
+    /// Errors collected since the last call, oldest first.
+    pub fn errors(&self) -> Vec<String> {
+        self.errors.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+    }
+
+    /// Operations mined in the given blocks (the `Transaction` entity). Two passes: the full
+    /// field set first, then without the unshield fields if the indexer schema lacks them.
+    pub async fn transactions_at(&self, blocks: &[u64]) -> Vec<OpRef> {
+        const FULL: &str = "query Q($b: [BigInt!]) { transactions(where: {blockNumber_in: $b}, limit: 1000) \
+            { transactionHash blockNumber blockTimestamp nullifiers commitments hasUnshield \
+              unshieldToAddress unshieldToken { tokenAddress } unshieldValue } }";
+        const MINIMAL: &str = "query Q($b: [BigInt!]) { transactions(where: {blockNumber_in: $b}, limit: 1000) \
+            { transactionHash blockNumber blockTimestamp nullifiers commitments } }";
+        let mut out = Vec::new();
+        for chunk in blocks.chunks(100) {
+            let vars = json!({ "b": chunk.iter().map(|b| b.to_string()).collect::<Vec<_>>() });
+            let data = match self.query::<TransactionsData>(FULL, vars.clone()).await {
+                Ok(d) => d,
+                Err(e1) => match self.query::<TransactionsData>(MINIMAL, vars).await {
+                    Ok(d) => {
+                        tracing::debug!("subsquid transactions: unshield fields unavailable ({e1:#})");
+                        d
+                    }
+                    Err(e2) => {
+                        self.report("transactions", &e2);
+                        continue;
+                    }
+                },
+            };
+            for t in data.transactions {
+                out.push(OpRef {
+                    transaction_hash: t.transaction_hash.to_ascii_lowercase(),
+                    block_number: parse_u64(&t.block_number).unwrap_or_default(),
+                    timestamp: t.block_timestamp.as_deref().and_then(parse_u64),
+                    nullifiers: t.nullifiers.iter().map(|n| norm_any(n)).collect(),
+                    commitments: t.commitments.iter().map(|c| norm_any(c)).collect(),
+                    has_unshield: t.has_unshield.unwrap_or(false)
+                        || t.unshield_value.as_deref().map(|v| v != "0").unwrap_or(false),
+                    unshield_to: t.unshield_to_address.filter(|a| a.len() == 42),
+                    unshield_token: t.unshield_token.and_then(|x| x.token_address),
+                    unshield_value: t.unshield_value.filter(|v| v != "0"),
+                });
+            }
+        }
+        out
     }
 
     async fn query<T: serde::de::DeserializeOwned>(&self, query: &str, vars: Value) -> Result<T> {
@@ -184,20 +368,21 @@ impl Squid {
                         );
                     }
                 }
-                Err(e) => tracing::warn!("subsquid commitments lookup failed: {e}"),
+                Err(e) => self.report("commitments", &e),
             }
         }
         out
     }
 
-    /// Nullifier (0x + 64 hex) -> chain reference.
-    pub async fn nullifiers(&self, nullifiers: &[String]) -> HashMap<String, ChainRef> {
+    /// Nullifier (0x + 64 hex) -> chain reference, for the nullifiers spent in the given blocks.
+    /// This squid has no `_in` filter on `Bytes` fields, only on numbers: query by block.
+    pub async fn nullifiers_at(&self, blocks: &[u64]) -> HashMap<String, ChainRef> {
         let mut out = HashMap::new();
-        for chunk in nullifiers.chunks(200) {
-            let hexes: Vec<String> = chunk.iter().map(|n| norm_hex(n)).collect();
-            let q = "query Q($n: [Bytes!]) { nullifiers(where: {nullifier_in: $n}, limit: 1000) \
+        for chunk in blocks.chunks(100) {
+            let b: Vec<String> = chunk.iter().map(|x| x.to_string()).collect();
+            let q = "query Q($b: [BigInt!]) { nullifiers(where: {blockNumber_in: $b}, limit: 1000) \
                      { nullifier blockNumber blockTimestamp transactionHash } }";
-            match self.query::<NullifiersData>(q, json!({ "n": hexes })).await {
+            match self.query::<NullifiersData>(q, json!({ "b": b })).await {
                 Ok(data) => {
                     for n in data.nullifiers {
                         out.insert(
@@ -210,19 +395,20 @@ impl Squid {
                         );
                     }
                 }
-                Err(e) => tracing::warn!("subsquid nullifiers lookup failed: {e}"),
+                Err(e) => self.report("nullifiers", &e),
             }
         }
         out
     }
 
-    /// Unshield events of the given transaction hashes.
-    pub async fn unshields(&self, tx_hashes: &[String]) -> Vec<UnshieldRef> {
+    /// Unshield events mined in the given blocks (no `_in` on `Bytes` fields on this squid).
+    pub async fn unshields_at(&self, blocks: &[u64]) -> Vec<UnshieldRef> {
         let mut out = Vec::new();
-        for chunk in tx_hashes.chunks(100) {
-            let q = "query Q($t: [Bytes!]) { unshields(where: {transactionHash_in: $t}, limit: 1000) \
+        for chunk in blocks.chunks(100) {
+            let b: Vec<String> = chunk.iter().map(|x| x.to_string()).collect();
+            let q = "query Q($b: [BigInt!]) { unshields(where: {blockNumber_in: $b}, limit: 1000) \
                      { blockNumber blockTimestamp transactionHash to token { tokenAddress } amount fee eventLogIndex } }";
-            match self.query::<UnshieldsData>(q, json!({ "t": chunk })).await {
+            match self.query::<UnshieldsData>(q, json!({ "b": b })).await {
                 Ok(data) => {
                     for u in data.unshields {
                         out.push(UnshieldRef {
@@ -237,7 +423,7 @@ impl Squid {
                         });
                     }
                 }
-                Err(e) => tracing::warn!("subsquid unshields lookup failed: {e}"),
+                Err(e) => self.report("unshields", &e),
             }
         }
         out

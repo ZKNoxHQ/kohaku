@@ -3,7 +3,7 @@
 //! The Railgun content topics do not follow the autosharding naming scheme, so the named pubsub
 //! topic endpoints are used rather than `/relay/v1/auto/*`.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -63,7 +63,9 @@ impl NwakuRest {
     }
 }
 
-#[async_trait]
+// reqwest's fetch futures are not `Send` on wasm32 (web build of the viewer)
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl WakuTransport for NwakuRest {
     async fn subscribe(&self) -> Result<(), TransportError> {
         let response = self

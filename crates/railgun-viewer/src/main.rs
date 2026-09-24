@@ -11,10 +11,17 @@ use tracing::info;
 mod api;
 mod chain;
 mod engine;
+mod health;
 mod history;
 mod keys;
+mod session;
 mod shared;
 mod signer;
+mod waku_link;
+
+/// The wallet's key derivation, under the name the shared modules use (`crate::wallet_keys`); the
+/// web build includes the same file under that name.
+pub(crate) use railgun_wallet::keys as wallet_keys;
 
 struct Args {
     port: u16,
@@ -63,6 +70,8 @@ async fn main() -> Result<()> {
         shared,
         version: env!("CARGO_PKG_VERSION"),
         data_dir: Arc::new(args.data_dir.display().to_string()),
+        bridge: Arc::new(railgun_broadcaster::BrowserBridge::new()),
+        bridge_clients: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     let listener = tokio::net::TcpListener::bind(addr)
         .await

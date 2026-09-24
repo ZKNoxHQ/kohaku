@@ -21,24 +21,35 @@ viewer on the same directory at the same time.
 | Source | Mode | POI |
 |---|---|---|
 | BIP-39 mnemonic (railgun or kohaku derivation, index) | full: both keys derived, same as the wallet | statuses read, missing proofs rebuilt and submitted like the wallet does |
-| viewing private key + 0zk address | view-only: the address carries the master public key | statuses and txid tree only (`with_poi_read_only`) |
-| shareable viewing key (`hex(msgpack({vpriv, spub}))`, the Railgun engine export) | view-only: spending public key unpacked from it | statuses and txid tree only |
+| private viewing key alone | view-only: the master public key is recovered on chain | statuses and txid tree only (`with_poi_read_only`) |
 
-A bare viewing key without the address is refused: note public keys are `poseidon(masterKey, random)`
-and the master key is `poseidon(spendingPubkey, nullifyingKey)`; the viewing key alone cannot
-recompute them, the address can.
+Note public keys are `poseidon(masterKey, random)` and the master key is
+`poseidon(spendingPubkey, nullifyingKey)`, so a viewing key alone cannot recompute them. The engine
+recovers the master key from the first transact note received in clear (kohaku wallets always
+leave it in clear; the Railgun engine does unless the sender reveals itself): a full scan of the
+chain's commitments on the first load, with progress in the log. An account that only ever
+received shields cannot be opened this way; use the mnemonic.
 
 ## Tabs
 
-* **Historique**: one row per transaction, newest first: date and block, kind, amounts in / out /
+* **History**: one row per transaction, newest first: coloured direction arrow, date and block, kind, amounts in / out /
   unshield per token, best POI status per list over the outputs, chain tx link, memo. Clicking a row
   opens the detail: memos, inputs and outputs with their own POI chips, unshield destination and fee,
   railgun txid, link to the same transaction in the lineage graph.
-* **Arbre des notes**: the NOXAKU lineage renderer (same JS), fed with a snapshot built from the
-  SDK state.
-* **POI manquantes**: transactions emitted by this account whose outputs carry no
+* **Note lineage**: the NOXAKU lineage renderer (same JS), fed with a snapshot built from the
+  SDK state. Arrow colours: blue = incoming from another address, purple = incoming with a valid or
+  submitted POI, green = outgoing, red = outgoing without a submitted POI, grey = shield or unknown.
+* **Missing POI**: transactions emitted by this account whose outputs carry no
   `ProofSubmitted` / `Valid` status on any list, with the reason, plus the local queue of proofs
   waiting for txid validation.
+
+## Network tab
+
+Four probes, no wallet needed: RPC (chain id, head, latency), subsquid (indexed height, lag in
+blocks, `transactions` entity and unshield fields), POI node (`ppoi_validated_txid`,
+`ppoi_node_status_v2`, operations not yet validated, configured lists served), broadcasters
+(`railgun-broadcaster` over nwaku REST: live signers, usable quotes for the base token, peers).
+`POST /api/health/run` starts them in the background, `GET /api/health` returns the report.
 
 ## Data sources
 

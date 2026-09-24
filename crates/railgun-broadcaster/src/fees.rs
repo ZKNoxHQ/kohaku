@@ -1,10 +1,8 @@
 //! Fee announcements: validation, cache, broadcaster selection and fee arithmetic.
 
-use std::{
-    collections::HashMap,
-    str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, str::FromStr};
+
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use railgun::{account::address::RailgunAddress, crypto::keys::HexKey};
 use serde::Serialize;

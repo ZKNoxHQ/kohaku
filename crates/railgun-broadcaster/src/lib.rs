@@ -29,3 +29,5 @@ pub use transport::{
     bridge::{BrowserBridge, Outbound, PublishAck, PublishStats, RemoteStatus},
     nwaku_rest::NwakuRest,
 };
+#[cfg(feature = "light-node")]
+pub use transport::light::LightNodeTransport;

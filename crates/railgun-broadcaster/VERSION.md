@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.2 (2026-09-23)
+
+Web build of the viewer (`railgun-viewer-web`, wasm32); native behaviour unchanged.
+
+* `WakuTransport` and its implementations use `async_trait(?Send)` on wasm32: reqwest's fetch
+  futures are not `Send` there (`NwakuRest` did not compile). Native builds keep `Send` futures.
+* Clocks through `web-time` (`SystemTime` in fees and nwaku REST timestamps, `Instant` in the
+  browser bridge and in `send_with_timeout`), and `gloo-timers` for the send loop's pause on
+  wasm32: `std::time` and tokio timers panic there. `web-time` is `std::time` on native.
+
+## 0.6.1 (2026-09-23)
+
+* `WakuTransport::publish_stats` (default `None`), implemented by `BrowserBridge` and
+  `LightNodeTransport`; `BroadcasterClient::publish_stats` forwards it. A caller can now tell,
+  whatever the transport, whether a request reached a Waku peer before blaming the broadcaster.
+* `LightNodeTransport` logs every light push at info level: accepted by how many peers, and the
+  refusals. It was a debug line, invisible in the wallet.
+
+## 0.6.0 (2026-09-23)
+
+* `LightNodeTransport` (feature `light-node`): the Waku node is `waku-light`, a native light
+  client on rust-libp2p, instead of js-waku in a browser tab or a local nwaku. `for_chain`
+  dials the fleet's wss peers on cluster 5 shard 1 and listens on the fees and
+  transact-response topics of the chain. Lazy start on the caller's runtime, stop on drop.
+  `subscribe` / `poll` report `Remote` (peers, service nodes, subscriptions, last error) until a
+  service node holds the subscription; `publish` is the light push outcome itself, so a refused
+  publish is an error at once instead of a missing acknowledgement.
+* Example `light_fees`: `BroadcasterClient` on that transport against the fleet, passive,
+  prints the authenticated offers and the authorized rates of the trusted signers.
+* Tests: fleet configuration, and every call reporting not-ready without any peer.
+
 ## 0.5.0 (2026-09-20)
 
 * `BrowserBridge`: publishes carry an id and are acknowledged (`PublishAck`), with counters in

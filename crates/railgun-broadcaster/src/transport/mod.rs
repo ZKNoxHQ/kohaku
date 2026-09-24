@@ -1,14 +1,16 @@
 //! Waku access, reduced to what the broadcaster protocol needs: publish a payload on a content
 //! topic and drain what arrived on a set of content topics.
 //!
-//! No mature Rust Waku node exists. The default implementation talks to a local nwaku node over
-//! its REST API; an in-memory hub backs the tests. A libwaku or js-waku bridge would implement
-//! the same trait.
+//! Implementations: [`light::LightNodeTransport`] (feature `light-node`), a native light node on
+//! rust-libp2p that dials the Railgun fleet itself; [`nwaku_rest::NwakuRest`], a local nwaku over
+//! REST; [`bridge::BrowserBridge`], js-waku in a browser tab; an in-memory hub for the tests.
 
 use async_trait::async_trait;
 use thiserror::Error;
 
 pub mod bridge;
+#[cfg(feature = "light-node")]
+pub mod light;
 #[cfg(any(test, feature = "testing"))]
 pub mod memory;
 pub mod nwaku_rest;
@@ -38,7 +40,9 @@ pub enum TransportError {
     Malformed(String),
 }
 
-#[async_trait]
+// reqwest's fetch futures are not `Send` on wasm32 (web build of the viewer)
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait WakuTransport: Send + Sync {
     /// Makes sure the node relays the Railgun shard. Idempotent.
     async fn subscribe(&self) -> Result<(), TransportError>;
@@ -51,6 +55,13 @@ pub trait WakuTransport: Send + Sync {
 
     /// Number of connected peers, when the node can tell. Diagnostic only.
     async fn peer_count(&self) -> Option<usize> {
+        None
+    }
+
+    /// What happened to the publishes so far, when the transport knows. Compare two readings
+    /// around a send: a request no Waku peer accepted looks, from the answer side, exactly like
+    /// a broadcaster that stays silent.
+    fn publish_stats(&self) -> Option<bridge::PublishStats> {
         None
     }
 }

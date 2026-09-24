@@ -6,10 +6,12 @@ use kohaku_db::{Database, memory::MemoryDatabase};
 use crate::{
     chain_config::ChainConfig,
     circuit::groth16_prover::Groth16Prover,
+    crypto::keys::{MasterPublicKey, ViewingKey},
     indexer::{
-        syncer::{ChainedSyncer, RpcSyncer, SubsquidSyncer, UtxoSyncer},
+        syncer::{ChainedSyncer, RpcSyncer, SubsquidSyncer, SyncEvent, UtxoSyncer},
         utxo_indexer::UtxoIndexer,
     },
+    note::utxo::discover_master_key,
     merkle_tree::SmartWalletUtxoVerifier,
     poi::provider::PoiProvider,
     provider::{RailgunProvider, RailgunProviderError},
@@ -68,6 +70,45 @@ impl RailgunBuilder {
     pub fn with_poi(mut self) -> Self {
         self.poi = true;
         self
+    }
+
+    /// ZKNOX viewer: master public key of an account known only by its viewing key, read from the
+    /// first transact note that decrypts with it and reproduces its on-chain hash. Scans the
+    /// chain's commitments from `from_block` (default: the deployment block) to the head with the
+    /// same syncer chain as [`Self::build`]; `progress(scanned_to, head)` is called per chunk.
+    /// Returns the key with the block timestamp of the note. `None` when no such note exists (an
+    /// account that only ever received shields, or whose senders all revealed themselves).
+    pub async fn discover_master_key(
+        &self,
+        viewing_key: ViewingKey,
+        from_block: Option<u64>,
+        progress: &(dyn Fn(u64, u64) + Sync),
+    ) -> Result<Option<(MasterPublicKey, u64)>, Box<dyn std::error::Error + Send + Sync>> {
+        let syncer: Arc<dyn UtxoSyncer> = match &self.utxo_syncer {
+            Some(s) => s.clone(),
+            None => Arc::new(
+                ChainedSyncer::new()
+                    .then(SubsquidSyncer::new(&self.chain.subsquid_endpoint))
+                    .then(RpcSyncer::new(self.chain.clone(), self.provider.clone())),
+            ),
+        };
+        let head = syncer.latest_block().await?;
+        let mut from = from_block.unwrap_or(self.chain.deployment_block);
+        const CHUNK: u64 = 50_000;
+        while from <= head {
+            let to = (from + CHUNK - 1).min(head);
+            let events = syncer.sync(from, to).await?;
+            for event in &events {
+                if let SyncEvent::Transact(t, timestamp) = event {
+                    if let Some(master) = discover_master_key(viewing_key, t) {
+                        return Ok(Some((master, *timestamp)));
+                    }
+                }
+            }
+            progress(to, head);
+            from = to + 1;
+        }
+        Ok(None)
     }
 
     /// ZKNOX viewer: like [`Self::with_poi`], but the provider only reads statuses and syncs the

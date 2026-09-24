@@ -13,44 +13,7 @@ use railgun::{
 };
 use alloy::primitives::U256;
 
-/// Viewing key + spending public key (from a shareable viewing key).
-pub struct SpubSigner {
-    viewing: ViewingKey,
-    spending_pub: SpendingPublicKey,
-    placeholder: SpendingKey,
-    chain: ChainId,
-}
-
-impl SpubSigner {
-    pub fn new(viewing: ViewingKey, spending_pub: SpendingPublicKey, chain_id: u64) -> Arc<Self> {
-        Arc::new(Self {
-            viewing,
-            spending_pub,
-            placeholder: rand::random(),
-            chain: ChainId::evm(chain_id),
-        })
-    }
-}
-
-impl RailgunSigner for SpubSigner {
-    fn chain_id(&self) -> ChainId {
-        self.chain
-    }
-    fn viewing_key(&self) -> ViewingKey {
-        self.viewing
-    }
-    fn spending_key(&self) -> SpendingKey {
-        self.placeholder
-    }
-    fn spending_pubkey(&self) -> SpendingPublicKey {
-        self.spending_pub
-    }
-    fn sign(&self, _inputs: U256) -> Result<SpendingSignature, RailgunSignerError> {
-        Err(RailgunSignerError::new("view-only signer: no spending key"))
-    }
-}
-
-/// Viewing key + master public key (from the 0zk address). The spending public key is unknown:
+/// Viewing key + master public key (discovered on chain). The spending public key is unknown:
 /// only the master key is used by the read paths.
 pub struct MasterSigner {
     viewing: ViewingKey,

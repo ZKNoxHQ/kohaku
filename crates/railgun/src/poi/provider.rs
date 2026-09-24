@@ -206,6 +206,41 @@ impl PoiProvider {
         Ok(())
     }
 
+    /// ZKNOX viewer: status per list of one blinded commitment, asked to the POI node now.
+    /// `status()` folds the lists into the worst status; this keeps them apart. A list that
+    /// cannot be reached yields `None`.
+    pub async fn statuses_per_list(
+        &mut self,
+        blinded_commitment: BlindedCommitment,
+        commitment_type: BlindedCommitmentType,
+    ) -> Vec<(String, Option<PoiStatus>)> {
+        let mut out = Vec::new();
+        for list_key in self.list_keys() {
+            let name = serde_json::to_value(&list_key)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| list_key.to_string());
+            let status = match self
+                .poi_client
+                .poi_status(&list_key, blinded_commitment, commitment_type)
+                .await
+            {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    debug!("POI status probe failed for {blinded_commitment} ({list_key}): {e}");
+                    None
+                }
+            };
+            out.push((name, status));
+        }
+        out
+    }
+
+    /// ZKNOX viewer: past operations whose POI the recovery pass saw as `Valid` on the node.
+    pub fn recovered_valid(&self) -> Vec<Txid> {
+        self.inner.recovered_valid.iter().copied().collect()
+    }
+
     /// ZKNOX viewer: operations of the registered accounts that the txid indexer keeps in full.
     pub fn own_operations(&self) -> Vec<(Txid, crate::indexer::syncer::Operation)> {
         self.txid_indexer

@@ -154,7 +154,8 @@ impl Logs {
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyStatus {
-    /// "browser": js-waku in the wallet tab. "nwaku": local node over REST.
+    /// "native": light node in the daemon. "browser": js-waku in the wallet tab. "nwaku": local
+    /// node over REST.
     pub mode: Option<String>,
     pub waku_url: Option<String>,
     pub reachable: bool,
@@ -200,8 +201,11 @@ impl<S: Subscriber> Layer<S> for FrontLogLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let meta = event.metadata();
         let target = meta.target();
-        // Only our own crates: dependency chatter (hyper, reqwest...) stays on stderr.
-        if !(target.starts_with("railgun") || target.starts_with("userop_kit")) {
+        // Only our own crates: dependency chatter (hyper, reqwest, libp2p...) stays on stderr.
+        if !(target.starts_with("railgun")
+            || target.starts_with("userop_kit")
+            || target.starts_with("waku_light"))
+        {
             return;
         }
         let mut visitor = MsgVisitor(String::new());

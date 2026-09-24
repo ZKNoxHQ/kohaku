@@ -95,8 +95,78 @@ impl ChainConfig {
         match chain_id {
             c if c == Self::mainnet().id => Some(Self::mainnet()),
             c if c == Self::sepolia().id => Some(Self::sepolia()),
+            c if c == Self::bnb().id => Some(Self::bnb()),
+            c if c == Self::polygon().id => Some(Self::polygon()),
+            c if c == Self::arbitrum().id => Some(Self::arbitrum()),
             _ => None,
         }
+    }
+
+    /// Chains known to this build, for UI selectors.
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::mainnet(),
+            Self::sepolia(),
+            Self::bnb(),
+            Self::polygon(),
+            Self::arbitrum(),
+        ]
+    }
+
+    // ZKNOX fork: the three other Railgun V2 deployments. Proxy and wrapped-token addresses and
+    // subsquid endpoints follow @railgun-community/shared-models; relay-adapt addresses and POI
+    // start blocks are from memory of the same file and only matter for relayed spends, which
+    // the viewer never does. Verify them before spending through the relay adapt on these chains.
+
+    pub fn bnb() -> Self {
+        Self::new(
+            56,
+            address!("0x590162bf4b50f6576a459b75309ee21d92178a10"),
+            25,
+            address!("0x741936fb83ddf324636d3048b3e6bc800b8d9e12"),
+            address!("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"),
+            17421663,
+            33336700,
+            "https://rail-squid.squids.live/squid-railgun-bsc-v2/v/v1/graphql",
+            "https://ppoi.fdi.network/",
+            &["efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88"],
+            None,
+            None,
+        )
+    }
+
+    pub fn polygon() -> Self {
+        Self::new(
+            137,
+            address!("0x19b620929f97b7b990801496c3b361ca5def8c71"),
+            25,
+            address!("0xc7ffa542736321a3dd69246d73987566a5486968"),
+            address!("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"),
+            28083766,
+            49877700,
+            "https://rail-squid.squids.live/squid-railgun-polygon-v2/v/v1/graphql",
+            "https://ppoi.fdi.network/",
+            &["efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88"],
+            None,
+            None,
+        )
+    }
+
+    pub fn arbitrum() -> Self {
+        Self::new(
+            42161,
+            address!("0xfa7093cdd9ee6932b4eb2c9e1cde7ce00b1fa4b9"),
+            25,
+            address!("0x5ad95c537b002770a39dea342c4bb2b68b1497aa"),
+            address!("0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
+            56109834,
+            148574000,
+            "https://rail-squid.squids.live/squid-railgun-arbitrum-v2/v/v1/graphql",
+            "https://ppoi.fdi.network/",
+            &["efc6ddb59c098a13fb2b618fdae94c1c3a807abc8fb1837c93620c9143ee9e88"],
+            None,
+            None,
+        )
     }
 
     pub fn mainnet() -> Self {

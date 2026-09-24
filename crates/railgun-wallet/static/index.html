@@ -186,6 +186,7 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
       <div>
         <label for="f-wakumode">Waku node (legacy)</label>
         <select id="f-wakumode">
+          <option value="native">Native, inside the wallet (no tab needed)</option>
           <option value="browser">In this tab (js-waku), keep the tab open</option>
           <option value="nwaku">Local nwaku over REST</option>
         </select>
@@ -379,6 +380,13 @@ function loadPrefs() {
     try { const v = localStorage.getItem("rgw:" + id); if (v !== null) $(id).value = v; } catch {}
   }
   try { const p = localStorage.getItem("rgw:f-poi"); if (p !== null) $("f-poi").checked = p === "1"; } catch {}
+  // 0.12.0: the native node replaces the one of the page as default, once, for stored "browser".
+  try {
+    if (localStorage.getItem("rgw:native-waku-default") === null) {
+      if ($("f-wakumode").value === "browser") $("f-wakumode").value = "native";
+      localStorage.setItem("rgw:native-waku-default", "1");
+    }
+  } catch {}
 }
 function savePrefs() {
   for (const id of PREFS) { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} }
@@ -480,8 +488,10 @@ function renderLegacy(s) {
       ? ` ${l.trustedSigners} trusted signer(s), authorized rate ${auth.feePerUnitGas}, accepted from ${BigInt(auth.feePerUnitGas) - BigInt(auth.feePerUnitGas) * 10n / 100n} to ${BigInt(auth.feePerUnitGas) + BigInt(auth.feePerUnitGas) * 30n / 100n}.`
       : ` ${l.trustedSigners} trusted signer(s), no rate announced yet: every offer is held back.`;
   $("legacy-state").textContent = l.reachable
-    ? `Waku node ${l.mode === "browser" ? "in this tab" : l.wakuUrl}: connected${l.peers != null ? `, ${l.peers} peer(s)` : ""}. ${usable.filter(underCeiling).length} of ${usable.length} broadcaster offer(s) usable for the wrapped base token.${trust}`
-    : `Waku node ${l.wakuUrl || ""} unreachable: ${l.error || "no answer"}. Start nwaku on the Railgun shard (see the README) to use the legacy transport.`;
+    ? `Waku node ${l.mode === "browser" ? "in this tab" : l.mode === "native" ? "(native)" : l.wakuUrl}: connected${l.peers != null ? `, ${l.peers} peer(s)` : ""}. ${usable.filter(underCeiling).length} of ${usable.length} broadcaster offer(s) usable for the wrapped base token.${trust}`
+    : l.mode === "native"
+      ? `Native Waku node not ready: ${l.error || "starting"}. It dials the Railgun fleet (wss, port 8000) and retries on its own.`
+      : `Waku node ${l.wakuUrl || ""} unreachable: ${l.error || "no answer"}. Start nwaku on the Railgun shard (see the README) to use the legacy transport.`;
   const q = $("legacy-quotes"); q.replaceChildren();
   if (state.transport !== "legacy" || !usable.length) return;
   const table = h("table", {}, h("tr", {}, h("th", { text: "" }), h("th", { text: "Broadcaster" }), h("th", { class: "num", text: "Rate (× gas cost)" }), h("th", { class: "num", text: "Reliability" }), h("th", { class: "num", text: "Expires in" })));
@@ -505,6 +515,7 @@ function renderLegacy(s) {
 function legacyProblem(s) {
   const l = state.legacy;
   if (!l || !l.mode) return "The broadcaster monitor has not reported yet.";
+  if (!l.reachable && l.mode === "native") return `The native Waku node is not connected yet (${l.error || "starting"}). It dials the Railgun fleet over wss on port 8000 and retries on its own; a network that blocks outgoing WebSocket connections to that port prevents it.`;
   if (!l.reachable && l.mode === "browser") return `${tab.note()} Daemon side: ${l.error || "waiting"}. The node lives in this page: keep the tab open while using the legacy transport.`;
   if (!l.reachable) return `No Waku node answers at ${l.wakuUrl} (${l.error || "no answer"}). The legacy transport needs a local nwaku node on the Railgun shard: see crates/railgun-broadcaster/README.md. To try the path without the network, run: cargo run -p railgun-broadcaster --example fake_network -- 8645 ${s.chainId}`;
   if (rateCeiling() === null) return "The highest rate accepted is not a number. Use a multiple of the gas cost such as 1.5.";
@@ -759,6 +770,12 @@ syncWakuModeField();
 resetUnlockForm();
 api("/api/defaults").then((d) => {
   $("app-version").textContent = "v" + d.version;
+  if (d.nativeWaku === false) {
+    const opt = $("f-wakumode").querySelector('option[value="native"]');
+    if (opt) opt.remove();
+    if (!$("f-wakumode").value) $("f-wakumode").value = "browser";
+    syncWakuModeField();
+  }
   document.title = "Railgun wallet v" + d.version;
   if (!$("f-trusted").value.trim()) $("f-trusted").value = d.trustedFeeSigners.join("\n");
 }).catch(() => {});

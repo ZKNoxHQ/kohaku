@@ -129,6 +129,12 @@ impl BroadcasterClient {
         self.transport.peer_count().await
     }
 
+    /// Publish counters of the transport, when it keeps them (see
+    /// [`WakuTransport::publish_stats`]).
+    pub fn publish_stats(&self) -> Option<crate::PublishStats> {
+        self.transport.publish_stats()
+    }
+
     /// Drains the transport once and files what arrived. Call it periodically.
     /// Returns the number of fee announcements accepted.
     pub async fn pump(&self) -> Result<usize, ClientError> {
@@ -262,8 +268,8 @@ impl BroadcasterClient {
         // Answers to earlier requests cannot be ours.
         self.responses.lock().unwrap().clear();
 
-        let started = tokio::time::Instant::now();
-        let mut last_publish: Option<tokio::time::Instant> = None;
+        let started = web_time::Instant::now();
+        let mut last_publish: Option<web_time::Instant> = None;
         info!(
             "relaying through broadcaster {}…",
             &request.broadcaster[..request.broadcaster.len().min(16)]
@@ -280,7 +286,7 @@ impl BroadcasterClient {
                     Ok(()) => debug!("transact request published"),
                     Err(e) => warn!("publish failed, will retry: {e}"),
                 }
-                last_publish = Some(tokio::time::Instant::now());
+                last_publish = Some(web_time::Instant::now());
             }
 
             if let Err(e) = self.pump().await {
@@ -294,7 +300,10 @@ impl BroadcasterClient {
                     response.error.unwrap_or_else(|| "no reason given".into()),
                 ));
             }
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::time::sleep(POLL_INTERVAL).await;
+            #[cfg(target_arch = "wasm32")]
+            gloo_timers::future::sleep(POLL_INTERVAL).await;
         }
     }
 

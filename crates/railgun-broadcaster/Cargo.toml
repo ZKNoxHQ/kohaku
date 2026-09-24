@@ -1,6 +1,6 @@
 [package]
 name = "railgun-broadcaster"
-version = "0.5.0"
+version = "0.6.2"
 edition = "2024"
 description = "Client for the Railgun community broadcaster network (Waku transport)"
 publish = false
@@ -11,6 +11,8 @@ doctest = false
 [features]
 # In-memory Waku hub and a mock broadcaster, for tests of downstream crates.
 testing = []
+# Native Waku light node (rust-libp2p): `LightNodeTransport`.
+light-node = ["dep:waku-light"]
 
 [dependencies]
 aes-gcm = { workspace = true }
@@ -28,7 +30,18 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync"] }
 tracing = { workspace = true }
+# std::time clocks panic on wasm32-unknown-unknown; web-time is std::time on native
+web-time = { workspace = true }
+waku-light = { path = "../waku-light", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true, features = ["futures"] }
 
 [dev-dependencies]
 railgun-broadcaster = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["full"] }
+tracing-subscriber = { workspace = true }
+
+[[example]]
+name = "light_fees"
+required-features = ["light-node"]
