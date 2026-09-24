@@ -1,11 +1,29 @@
 # Changelog
 
+## 0.13.0 (2026-09-24)
+
+Integration release on ZKNoxHQ (`zknox/railgun-integration`): the Ledger signer work
+(`zknox/railgun-wallet`, Simon), then the native Waku node (0.12.1, `zknox/railgun-wallet-waku`),
+then the Android crate and the wallet library split (0.10.1, 0.11.0 to 0.11.3). No new wallet
+feature. Dr Rail (`railgun-viewer`, `railgun-viewer-web`) is to be rebased onto this branch once
+its current work settles.
+
+* Features: `http` (axum server and embedded front) and `native-waku` (native Waku node), both
+  on by default. The Android crate builds the library without either: no server, and the
+  "native" Waku mode falls back to the WebView's node, as designed in ADR-032.
+* `/api/defaults` (now in `ipc.rs`, where the Android split moved the dispatch) reports
+  `nativeWaku`.
+* Known risk: the wallet depends on `railgun-ledger` with its `usb` and `ble` transports enabled,
+  also for the Android build. Whether coins-ledger and btleplug build for aarch64-linux-android is
+  not verified; the APK workflow will tell. If not, those transports need wallet features that
+  the Android crate leaves off.
+
 ## 0.12.1 (2026-09-23)
 
 Waku mode "native", the new default: the legacy transport's Waku node runs inside the daemon
 (`railgun-broadcaster::LightNodeTransport` on `waku-light`, rust-libp2p) instead of js-waku in
 the wallet tab. No tab to keep open, no JavaScript on that path. Rebased onto the Ledger signer
-work (`railgun-ledger`); 0.10.1 and 0.11.x belong to the Android branch, not merged here.
+work (`railgun-ledger`).
 
 * Unlock form: "Native, inside the wallet" first in the Waku node list. A stored "browser" choice
   is switched to "native" once; choosing "browser" again afterwards sticks. "browser" and

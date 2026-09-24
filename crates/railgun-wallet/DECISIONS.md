@@ -327,3 +327,13 @@ talking to an older build. Enabling it on Android is a later, separate step.
 
 The js-waku bundle and `/api/waku/exchange` stay in this release; they go once the native mode
 has run a few days.
+
+## ADR-033: one integration line on ZKNoxHQ, stacked in validation order
+
+Several lines had grown from 0.10.0: the Ledger signer (Simon, `zknox/railgun-wallet`), the
+native Waku node, Android (wallet as a library) and Dr Rail. They are stacked on Simon's branch
+one at a time, most validated first, so that each conflict is resolved once: Waku (validated
+against the fleet), then Android. Dr Rail comes last and only when its own work is at a stable
+point, because it uses the wallet as a library (`railgun_wallet::db`, `keys`), which exists only
+since the Android split, and because its SDK additions must follow the signer API of the Ledger
+work (`spending_public_key`, async `sign`): hardware signers are the harder constraint.
