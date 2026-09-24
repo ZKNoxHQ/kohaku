@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ledger WebUSB / Web Bluetooth test</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+      button { font-size: 1rem; padding: .6rem 1rem; margin: .3rem .3rem 0 0; }
+      pre { background: #111; color: #6f6; padding: 1rem; border-radius: 6px;
+            white-space: pre-wrap; word-break: break-all; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Ledger transport test</h1>
+    <p>Plug in / pair the Ledger, unlock it, open the ZKNOX Railgun app, then click.
+       (Each transport needs a user click — browsers only allow the device picker then.)</p>
+    <button id="usb">Connect Ledger — WebUSB</button>
+    <button id="ble">Connect Ledger — Web Bluetooth</button>
+    <pre id="log"></pre>
+
+    <script type="module">
+      import init, { RailgunSigner } from "./pkg/index.js";
+
+      const out = document.getElementById("log");
+      const log = (m) => { out.textContent += m + "\n"; console.log(m); };
+
+      log("secure context: " + window.isSecureContext);
+      log("WebUSB: " + ("usb" in navigator) + " | Web Bluetooth: " + ("bluetooth" in navigator));
+      await init();
+      log("wasm loaded — ready.");
+
+      async function connect(kind) {
+        try {
+          log("\n[" + kind + "] requesting device — approve the prompts on the Ledger…");
+          const signer = kind === "usb"
+            ? await RailgunSigner.connectLedgerWebUsb(0)
+            : await RailgunSigner.connectLedgerWebBle(0);
+          log("[" + kind + "] connected ✓");
+          log("  0zk address: " + signer.address);
+        } catch (e) {
+          log("[" + kind + "] ERROR: " + (e && e.message ? e.message : e));
+        }
+      }
+
+      document.getElementById("usb").onclick = () => connect("usb");
+      document.getElementById("ble").onclick = () => connect("ble");
+    </script>
+  </body>
+</html>

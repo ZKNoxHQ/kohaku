@@ -104,6 +104,10 @@ impl JsRailgunProvider {
     /// transaction, with an additional fee note transfer to cover the bundler fees. The
     /// `fee_payer` is the signer that will authorize the fee note transfer to the bundler's
     /// address for the estimated fee amount in `fee_token`.
+    ///
+    /// The gas limits are simulated first (`eth_call` with state overrides), so the fee is fixed
+    /// and the transaction is proved — hence signed on a hardware wallet — exactly once, instead of
+    /// re-proving until the fee converges. This requires the RPC to support state overrides.
     #[wasm_bindgen(js_name = "prepareUserOp")]
     pub async fn prepare_userop(
         &mut self,
@@ -114,20 +118,28 @@ impl JsRailgunProvider {
         #[wasm_bindgen(js_name = "feeToken", unchecked_param_type = "`0x${string}`")]
         fee_token: String,
         calldata: Option<Vec<Call>>,
+        #[wasm_bindgen(js_name = "marginPercent")] margin_percent: Option<u32>,
     ) -> Result<JsSignableUserOperation, JsError> {
         let fee_token = Address::from_str(&fee_token).map_err(|e| JsError::new(&e.to_string()))?;
         let calldata = calldata.unwrap_or_default();
+        let has_call = !calldata.is_empty();
         let mut rng = rand::rng();
+
+        // Same 25% margin the native wallet uses by default; lower it to shrink the userOp's
+        // maxCost when the shared paymaster's deposit is nearly drained.
+        let margin_percent = margin_percent.unwrap_or(25);
 
         let signable = self
             .inner
-            .prepare_userop(
+            .prepare_userop_single(
                 builder.inner.clone(),
                 bundler.inner().as_ref(),
                 smart_account.inner(),
                 fee_payer.inner(),
                 fee_token,
                 calldata,
+                has_call,
+                margin_percent,
                 &mut rng,
             )
             .await
