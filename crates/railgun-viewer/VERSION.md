@@ -1,5 +1,10 @@
 # railgun-viewer — journal des versions
 
+## 0.2.20 — 2026-09-25
+
+### Ajouté
+- Nœud POI injoignable depuis le réseau : après l'unlock (POI actif), un appel `ppoi_validated_txid` sans réponse HTTP (refus, DNS, timeout, CORS) laisse une ligne `✗` dans le Log et l'erreur courante, au lieu de statuts « inconnu » sans explication. Pour le nœud par défaut, le message explique que ppoi.fdi.network publie une IPv6 qui refuse les connexions : les réseaux avec IPv4 (Wi-Fi) retombent dessus, les réseaux mobiles IPv6 seuls non. Même texte dans la carte POI de l'onglet Network (`unreachable from this network`). Une erreur JSON-RPC du nœud compte comme une réponse. `health::poi_reachable`, `health::POI_IPV6_HINT`, `session::warn_if_poi_unreachable`, communs au daemon et à la version web.
+
 ## 0.2.19 — 2026-09-24
 
 ### Corrigé

@@ -212,6 +212,12 @@ impl RailgunProvider {
     }
 
     /// POI list keys this provider proves against, empty when POI is off.
+    /// ZKNOX fork: the EIP-1193 provider behind this instance (gas price, gas estimates), for
+    /// flows built outside the crate such as the broadcaster transport of railgun-ts.
+    pub fn eth_provider(&self) -> Arc<dyn Eip1193Provider> {
+        self.provider.clone()
+    }
+
     pub fn poi_list_keys(&self) -> Vec<String> {
         self.poi_provider
             .as_ref()

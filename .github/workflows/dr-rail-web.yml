@@ -1,16 +1,22 @@
-name: dr rail web
+name: web site (wallet + viewer)
 
-# Builds Dr Rail as a static site (wasm engine in a Web Worker, see crates/railgun-viewer-web) and
-# publishes it on GitHub Pages; the same files are kept as an artifact for any other static host.
+# Builds the static site with the two pages (web-site/build.sh): the wallet (crates/railgun-ts,
+# web/index.html) and the viewer Dr Rail (crates/railgun-viewer-web), publishes it on GitHub
+# Pages and keeps the same files as an artifact for any other static host (Netlify Drop, …).
 # Pages: Settings > Pages > Source "GitHub Actions", and allow the branch in
 # Settings > Environments > github-pages if it is not the default branch.
 on:
   workflow_dispatch:
   push:
-    branches: [zknox/dr-rail]
+    branches: [zknox/railgun-integration, zknox/railgun-integration-serverless, zknox/dr-rail]
     paths:
       - crates/railgun-viewer/**
       - crates/railgun-viewer-web/**
+      - crates/railgun-ts/**
+      - crates/railgun-ledger/**
+      - crates/eip-1193-provider/**
+      - crates/waku-light/**
+      - web-site/**
       - crates/railgun/**
       - crates/railgun-broadcaster/**
       - crates/railgun-wallet/src/keys.rs
@@ -40,7 +46,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: dr-rail-web
+          key: web-site
 
       - name: wasm-bindgen-cli and binaryen
         run: |
@@ -49,17 +55,17 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq binaryen
 
       - name: build
-        run: sh crates/railgun-viewer-web/build.sh
+        run: bash web-site/build.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dr-rail-web
-          path: crates/railgun-viewer-web/dist
+          name: web-site
+          path: web-site/dist
           include-hidden-files: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: crates/railgun-viewer-web/dist
+          path: web-site/dist
 
   deploy:
     needs: build

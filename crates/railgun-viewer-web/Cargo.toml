@@ -1,6 +1,6 @@
 [package]
 name = "railgun-viewer-web"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "Dr Rail as a static web page: the railgun-viewer session core compiled to wasm and run in a Web Worker"
 publish = false

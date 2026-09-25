@@ -23,7 +23,7 @@ use crate::{
 /// Interfaces with the RAILGUN protocol.
 #[wasm_bindgen(js_name = "RailgunProvider")]
 pub struct JsRailgunProvider {
-    inner: RailgunProvider,
+    pub(crate) inner: RailgunProvider,
 }
 
 #[derive(Tsify, Serialize)]

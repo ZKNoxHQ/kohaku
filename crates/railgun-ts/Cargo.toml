@@ -42,6 +42,10 @@ kohaku-db = { workspace = true }
 # rlib for native tests).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 railgun-ledger = { workspace = true, features = ["webusb", "webble"] }
+# Legacy transport: broadcasters over the Rust Waku light node (waku-light on the browser's
+# WebSocket), no js-waku.
+railgun-broadcaster = { path = "../railgun-broadcaster", features = ["light-node"] }
+gloo-timers = { workspace = true, features = ["futures"] }
 
 [profile.release]
 opt-level = "z"

@@ -211,6 +211,7 @@ impl Actor {
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
 
+        let poi_endpoint = chain.poi_endpoint.clone();
         let cache_path = data_dir.join("viewer-cache.json");
         let caches = load_caches(&cache_path);
         info!(%address, chain = chain.id, mode, scheme, poi = p.poi, rpc = %rpc_url, "viewer unlocked");
@@ -234,6 +235,9 @@ impl Actor {
             s.chain_id = Some(p.chain_id);
             s.last_error = None;
             s.updated_at = now_ms();
+        }
+        if p.poi {
+            session::warn_if_poi_unreachable(p.chain_id, &poi_endpoint, &self.shared).await;
         }
         Ok(())
     }

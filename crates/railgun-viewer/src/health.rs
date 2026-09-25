@@ -125,6 +125,26 @@ async fn gql(client: &reqwest::Client, endpoint: &str, query: &str) -> Result<Va
     v.get("data").cloned().ok_or_else(|| "no data".into())
 }
 
+/// Why the default POI node can be out of reach: shown with network-level failures.
+pub const POI_IPV6_HINT: &str = "ppoi.fdi.network publishes an IPv6 address that refuses connections: \
+networks with IPv4 (Wi-Fi, most home and office networks) fall back to it, IPv6-only mobile networks \
+cannot reach it. Use a network with IPv4.";
+
+/// Whether this network reaches the POI node at all: `Err` only when the request did not get an
+/// HTTP answer (connection refused, DNS, timeout, CORS), whatever the JSON-RPC result.
+pub async fn poi_reachable(chain_id: u64, endpoint: &str) -> Result<(), String> {
+    let params = json!({ "chainType": "0", "chainID": chain_id.to_string(), "txidVersion": "V2_PoseidonMerkle" });
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "ppoi_validated_txid", "params": params });
+    http_client()
+        .post(endpoint)
+        .header("content-type", "application/json")
+        .body(serde_json::to_vec(&body).map_err(|e| e.to_string())?)
+        .send()
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 async fn rpc_call(client: &reqwest::Client, endpoint: &str, method: &str, params: Value) -> Result<Value, String> {
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     let resp = client
@@ -314,6 +334,12 @@ pub async fn run(
             let validated = rpc_call(&client, &c.poi_endpoint, "ppoi_validated_txid", chain_params.clone()).await;
             let latency = t0.elapsed().as_millis() as u64;
             match validated {
+                // a JSON-RPC error is an answer; no answer at all means the network does not reach
+                // the node, which the default node's dead IPv6 explains on IPv6-only networks
+                Err(e) if poi_reachable(p.chain_id, &c.poi_endpoint).await.is_err() => {
+                    let hint = if c.poi_endpoint.contains("ppoi.fdi.network") { format!(" · {POI_IPV6_HINT}") } else { String::new() };
+                    Probe::down(&format!("unreachable from this network{hint}"), e)
+                }
                 Err(e) => Probe::down("unreachable", e),
                 Ok(v) => {
                     let idx = v.get("validatedTxidIndex").and_then(Value::as_u64);

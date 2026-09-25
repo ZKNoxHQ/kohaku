@@ -1,6 +1,6 @@
 [package]
 name = "railgun-viewer"
-version = "0.2.19"
+version = "0.2.20"
 edition = "2024"
 description = "ZKNOX read-only Railgun history and lineage viewer on the kohaku Rust SDK (mnemonic or viewing key)"
 publish = false

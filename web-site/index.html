@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Railgun in the browser</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 36rem; padding: 0 1rem; color: #222; }
+      a.card { display: block; border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0;
+               text-decoration: none; color: inherit; }
+      a.card:hover { border-color: #888; }
+      a.card b { font-size: 1.1rem; }
+      p.note { font-size: .85rem; color: #666; }
+    </style>
+  </head>
+  <body>
+    <h1>Railgun in the browser</h1>
+    <a class="card" href="./wallet/"><b>Wallet</b><br />Sync, balance, private transfers signed on a Ledger (USB or
+      Bluetooth), sent through ERC-4337 or a broadcaster over Waku.</a>
+    <a class="card" href="./viewer/"><b>Viewer</b><br />History and Proof of Innocence status of an account from its
+      viewing key, and the state of the Railgun network.</a>
+    <p class="note">Static pages: everything runs in this browser (Rust compiled to WebAssembly). Keys never leave
+      the page; only the RPC, the POI node, the bundler and the Waku network are contacted.</p>
+  </body>
+</html>

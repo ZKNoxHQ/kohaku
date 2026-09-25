@@ -204,6 +204,7 @@ impl Actor {
         let mut railgun = builder.build().await.context("building railgun provider")?;
         railgun.register(signer.clone()).await?;
 
+        let poi_endpoint = chain.poi_endpoint.clone();
         let caches = match cache_load(&name).await {
             Ok(v) => v
                 .as_string()
@@ -236,6 +237,9 @@ impl Actor {
             s.chain_id = Some(p.chain_id);
             s.last_error = None;
             s.updated_at = now_ms();
+        }
+        if p.poi {
+            session::warn_if_poi_unreachable(p.chain_id, &poi_endpoint, &self.shared).await;
         }
         Ok(())
     }

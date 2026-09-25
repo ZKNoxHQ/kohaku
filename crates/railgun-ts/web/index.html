@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Railgun web wallet — sync test (stage 1)</title>
+    <title>Railgun web wallet</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 44rem; }
       input { width: 100%; font-size: 1rem; padding: .4rem; box-sizing: border-box; }
@@ -14,16 +14,28 @@
     </style>
   </head>
   <body>
-    <h1>Railgun web wallet — stage 1 (sync + balance)</h1>
+    <h1>Railgun web wallet (Sepolia)</h1>
+    <p style="font-size:.85rem;color:#555">Static page: the wallet runs in this browser (wasm), the Ledger signs over
+      WebUSB or Bluetooth, broadcasters are reached through a Rust Waku node running in the page.
+      Only the RPC, the POI node, the bundler and the Waku network are contacted.</p>
     <label for="rpc">Sepolia RPC URL (must allow browser CORS)</label>
     <input id="rpc" value="https://ethereum-sepolia-rpc.publicnode.com" />
-    <p><button id="go">Connect Ledger (WebUSB) → sync → balance</button></p>
+    <label for="poi">POI node (empty = the chain's default, ppoi.fdi.network)</label>
+    <input id="poi" value="" placeholder="https://ppoi.fdi.network/" />
+    <label for="ledger">Ledger transport</label>
+    <select id="ledger"><option value="usb">USB (WebUSB)</option><option value="ble">Bluetooth (Nano X, Stax, Flex)</option></select>
+    <p><button id="go">Connect Ledger → sync → balance</button></p>
     <p><button id="build" disabled>Build transfer to self (prove → Ledger-sign, no submit)</button></p>
     <label for="bundler">4337 bundler URL</label>
     <input id="bundler" value="https://public.pimlico.io/v2/11155111/rpc" />
     <label for="margin">Gas margin % (lower shrinks maxCost when the paymaster deposit is low; 25 = default)</label>
     <input id="margin" type="number" value="10" min="0" max="200" />
     <p><button id="submit" disabled>Submit transfer to self via 4337 (prove → Ledger-sign → broadcast)</button></p>
+    <h2 style="font-size:1.1rem;margin-top:1.4rem">Legacy transport: broadcaster over Waku (Rust node)</h2>
+    <p><button id="waku">Start the Waku node and collect broadcaster offers (15 s)</button></p>
+    <label for="maxRate">Fee ceiling, as a multiple of the gas cost (1.5 = default)</label>
+    <input id="maxRate" type="number" value="1.5" min="0.5" step="0.1" />
+    <p><button id="legacy" disabled>Submit transfer to self via a broadcaster (prove → Ledger-sign → Waku)</button></p>
     <pre id="log"></pre>
 
     <script type="module">
@@ -109,14 +121,33 @@
       const {
         default: init,
         chainConfigSepolia, withPoiEndpoint, RailgunBuilder, RailgunSigner,
-        Bundler, Signer, SimpleSmartAccount,
+        Bundler, Signer, SimpleSmartAccount, Broadcasters,
       } = await import("./pkg/index.js?v=" + V);
       await init("./pkg/index_bg.wasm?v=" + V);
       log("secure context: " + window.isSecureContext + " | WebUSB: " + ("usb" in navigator));
       log("wasm ready.");
 
       // Kept between stages.
-      let ethProvider = null, rg = null, signer = null, balance = null;
+      let ethProvider = null, rg = null, signer = null, balance = null, broadcasters = null;
+      // Reachability of the POI node from this network, without any relay. `no-cors` gives an
+      // opaque answer, enough to tell "the network reached the host" from "it did not" whatever
+      // the node's CORS headers are.
+      const POI_DEFAULT = "https://ppoi.fdi.network/";
+      async function poiReachable(url) {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 10000);
+        try {
+          await fetch(url, { method: "GET", mode: "no-cors", cache: "no-store", signal: ctl.signal });
+          return true;
+        } catch (_) {
+          return false;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      const updateLegacy = () => {
+        document.getElementById("legacy").disabled = !(balance && balance.length > 0 && broadcasters);
+      };
       const CHAIN_ID = 11155111n;
       const FEE_TOKEN = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14"; // Sepolia WETH (wrapped base token)
 
@@ -130,18 +161,32 @@
           ethProvider = makeProvider(document.getElementById("rpc").value.trim());
           log("RPC chainId: " + (await ethProvider.getChainId()) + ", block: " + (await ethProvider.getBlockNumber()));
 
-          // ppoi.fdi.network has a dead IPv6; the phone's browser fails to reach it.
-          // Route POI through the same-origin desktop proxy (/poi), which forwards
-          // to ppoi over working IPv4.
-          const poiUrl = location.origin + "/poi";
-          const chain = withPoiEndpoint(chainConfigSepolia(), poiUrl);
-          log("POI endpoint (proxied): " + poiUrl);
-          const db = makeDb("railgun-web-test");
+          // POI node called directly, no relay. ppoi.fdi.network publishes an IPv6 address that
+          // refuses connections: dual-stack networks fall back to IPv4, IPv6-only networks
+          // (NAT64 without CLAT) cannot reach it. Another node can be given in the field above.
+          const poiUrl = document.getElementById("poi").value.trim();
+          const chain = poiUrl ? withPoiEndpoint(chainConfigSepolia(), poiUrl) : chainConfigSepolia();
+          const poiTarget = poiUrl || POI_DEFAULT;
+          log("POI node: " + poiTarget + " — checking that this network reaches it…");
+          if (!(await poiReachable(poiTarget))) {
+            log("POI NODE UNREACHABLE from this network: " + poiTarget);
+            if (!poiUrl) {
+              log("  ppoi.fdi.network publishes an IPv6 address that refuses connections. Networks with IPv4");
+              log("  (Wi-Fi, most home and office networks) fall back to it; IPv6-only mobile networks cannot.");
+            }
+            log("  Switch to a network with IPv4 (Wi-Fi) or enter another POI node above, then retry.");
+            log("  Nothing was synced: balances and transfers need the POI node.");
+            return;
+          }
+          log("  reachable.");
+          const db = makeDb("railgun-web-wallet");
           log("building provider (POI enabled)…");
           rg = await new RailgunBuilder(chain, ethProvider).withDatabase(db).withPoi().build();
 
           log("connect Ledger — approve spending pubkey + viewing key…");
-          signer = await RailgunSigner.connectLedgerWebUsb(0);
+          signer = document.getElementById("ledger").value === "ble"
+            ? await RailgunSigner.connectLedgerWebBle(0)
+            : await RailgunSigner.connectLedgerWebUsb(0);
           log("address: " + signer.address);
           await rg.register(signer);
 
@@ -156,6 +201,7 @@
           document.getElementById("build").disabled = !funded;
           document.getElementById("submit").disabled = !funded;
           if (!funded) log("(no spendable balance — connect the funded account, passphrase off)");
+          updateLegacy();
         } catch (e) {
           log("ERROR: " + (e && e.message ? e.message : e));
         }
@@ -212,6 +258,50 @@
           log("SUBMITTED ✓ receipt: " + JSON.stringify(receipt, (_k, v) => typeof v === "bigint" ? v.toString() : v));
         } catch (e) {
           log("SUBMIT ERROR: " + (e && e.message ? e.message : e));
+        }
+      };
+
+      document.getElementById("waku").onclick = async () => {
+        const button = document.getElementById("waku");
+        button.disabled = true;
+        try {
+          if (!broadcasters) broadcasters = Broadcasters.connect(CHAIN_ID);
+          log("\nWaku (Rust node in this page): dialling the fleet, then listening 15 s…");
+          const received = await broadcasters.refresh(15000);
+          const peers = await broadcasters.peerCount();
+          const quotes = broadcasters.quotes();
+          const forFee = quotes.filter((q) => q.token.toLowerCase() === FEE_TOKEN.toLowerCase());
+          log("  " + received + " message(s), " + (peers ?? "?") + " peer(s), " + quotes.length + " offer(s), "
+              + forFee.length + " for the fee token");
+          for (const q of forFee.slice(0, 8)) {
+            log("   " + q.railgunAddress.slice(0, 18) + "… " + (q.identifier || "") + "  rate "
+                + (Number(q.feePerUnitGas) / 1e18).toFixed(3) + "× the gas cost, expires in "
+                + Math.max(0, Math.round((q.expiration - Date.now()) / 1000)) + " s");
+          }
+        } catch (e) {
+          log("WAKU ERROR: " + (e && e.message ? e.message : e));
+        } finally {
+          button.disabled = false;
+          updateLegacy();
+        }
+      };
+
+      document.getElementById("legacy").onclick = async () => {
+        try {
+          const asset = balance[0].asset;
+          const value = transferValue();
+          const rate = parseFloat(document.getElementById("maxRate").value);
+          log("\nsending " + value + " (base units) to self through a broadcaster, ceiling " + rate + "× the gas cost…");
+          log("  quote draw, fee estimate on dummy proofs, then proving + Ledger blind-sign (once)…");
+          const t0 = performance.now();
+          const builder = rg.transact().transfer(signer, signer.address, asset, value, "webusb legacy");
+          const out = await rg.sendViaBroadcaster(builder, broadcasters, signer, rate);
+          log("SENT ✓ in " + ((performance.now() - t0) / 1000).toFixed(1) + " s: tx " + out.txHash);
+          log("  broadcaster " + out.broadcaster.slice(0, 18) + "…, fee " + out.fee + " (wrapped base units), gas "
+              + out.gas + ", min gas price " + out.minGasPrice + " wei");
+          log("  https://sepolia.etherscan.io/tx/" + out.txHash);
+        } catch (e) {
+          log("LEGACY ERROR: " + (e && e.message ? e.message : e));
         }
       };
     </script>

@@ -184,6 +184,26 @@ pub async fn make_signer(
     }
 }
 
+/// After unlock: says plainly when this network cannot reach the POI node (statuses would stay
+/// unknown without explanation). Same check and wording in the daemon and in the web build.
+pub async fn warn_if_poi_unreachable(chain_id: u64, endpoint: &str, shared: &SharedRef) {
+    if let Err(e) = crate::health::poi_reachable(chain_id, endpoint).await {
+        let hint = if endpoint.contains("ppoi.fdi.network") {
+            format!(" {}", crate::health::POI_IPV6_HINT)
+        } else {
+            String::new()
+        };
+        let msg = format!(
+            "POI node unreachable from this network ({endpoint}): POI statuses will stay unknown.{hint} ({e})"
+        );
+        log(shared, format!("✗ {msg}"));
+        if let Ok(mut s) = shared.lock() {
+            s.last_error = Some(msg);
+            s.updated_at = now_ms();
+        }
+    }
+}
+
 /// Where the viewer cache (chain references, POI statuses, operations) is persisted: a JSON file
 /// next to the database on the daemon, IndexedDB in the web build.
 pub trait CacheStore {

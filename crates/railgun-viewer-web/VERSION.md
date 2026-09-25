@@ -1,5 +1,9 @@
 # railgun-viewer-web — journal des versions
 
+## 0.1.4 — 2026-09-25
+
+- Avertissement du viewer 0.2.20 quand le réseau n'atteint pas le nœud POI (cas des réseaux mobiles IPv6 seuls avec ppoi.fdi.network), après l'unlock et dans la carte POI de l'onglet Network.
+
 ## 0.1.3 — 2026-09-24
 
 - Nœud Waku Rust dans le Web Worker : `LightNodeTransport` (feature `light-node` du broadcaster 0.7.0, waku-light 0.4.1 sur le WebSocket du navigateur), un client par chaîne gardé entre les vérifications. `/api/defaults` répond `nativeWaku: true` : l'onglet Network propose le nœud Rust par défaut, comme le daemon, et js-waku dans la page reste en secours. Même code de sonde que le viewer 0.2.19 (attente de l'abonnement, fenêtre tolérante aux trous).
