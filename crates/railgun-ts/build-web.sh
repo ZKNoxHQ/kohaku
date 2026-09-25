@@ -22,4 +22,5 @@ if command -v wasm-opt >/dev/null 2>&1; then
     --enable-mutable-globals --enable-reference-types "$OUT/pkg/index_bg.wasm" -o "$OUT/pkg/index_bg.wasm"
 fi
 cp crates/railgun-ts/web/index.html "$OUT/index.html"
+cp crates/railgun-ts/web/style.css "$OUT/style.css"
 ls -la "$OUT" "$OUT/pkg"

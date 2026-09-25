@@ -48,6 +48,9 @@ js-sys = { workspace = true, optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "Window",
     "Navigator",
+    # WebUSB from a Web Worker (navigator.usb is exposed there in Chromium)
+    "WorkerGlobalScope",
+    "WorkerNavigator",
     # WebUSB
     "Usb",
     "UsbDevice",

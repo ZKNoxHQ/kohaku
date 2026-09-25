@@ -8275,6 +8275,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "railgun-wallet-web"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bip32",
+ "bip39",
+ "console_error_panic_hook",
+ "eip-1193-provider",
+ "futures",
+ "gloo-timers 0.3.0",
+ "hex",
+ "hmac 0.12.1",
+ "js-sys",
+ "kohaku-db",
+ "railgun",
+ "railgun-broadcaster",
+ "railgun-ledger",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-wasm",
+ "userop-kit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
 name = "rancor"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

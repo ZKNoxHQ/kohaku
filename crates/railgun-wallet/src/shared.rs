@@ -7,8 +7,14 @@
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, RwLock},
-    time::{SystemTime, UNIX_EPOCH},
 };
+
+// `std::time::SystemTime::now()` panics on wasm32-unknown-unknown (no clock); `web-time` is a
+// drop-in that reads the browser clock there and falls back to `std` on native.
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_arch = "wasm32")]
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;

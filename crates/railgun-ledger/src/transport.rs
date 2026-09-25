@@ -556,12 +556,21 @@ pub mod webusb {
         endpoint_out: u8,
     }
 
+    /// `navigator.usb`, from the page or from a dedicated worker (Chromium exposes WebUSB in
+    /// workers; only the permission picker `requestDevice` is main-thread-only).
+    fn usb_handle() -> Result<web_sys::Usb, TransportError> {
+        if let Some(win) = web_sys::window() {
+            return Ok(win.navigator().usb());
+        }
+        let scope: web_sys::WorkerGlobalScope = js_sys::global()
+            .dyn_into()
+            .map_err(|_| TransportError("no browser window and not a worker scope".into()))?;
+        Ok(scope.navigator().usb())
+    }
+
     impl WebUsbLedger {
         pub async fn connect() -> Result<Self, TransportError> {
-            let usb = web_sys::window()
-                .ok_or_else(|| TransportError("no browser window".into()))?
-                .navigator()
-                .usb();
+            let usb = usb_handle()?;
 
             // Build { filters: [{ vendorId: 0x2c97 }] } without depending on the
             // web-sys dictionary setter API (which shifts between versions).
@@ -578,6 +587,32 @@ pub mod webusb {
                 .map_err(|e| err("requestDevice (cancelled or no device?)", e))?
                 .unchecked_into();
 
+            Self::open_device(device).await
+        }
+
+        /// Opens a Ledger this origin is already authorized for, without the picker — the page
+        /// must have called `navigator.usb.requestDevice()` before (main thread, user gesture).
+        /// This is the worker-side entry: `getDevices()` works in a dedicated worker, where
+        /// `requestDevice()` does not exist.
+        pub async fn connect_existing() -> Result<Self, TransportError> {
+            let usb = usb_handle()?;
+            let devices: Array = JsFuture::from(usb.get_devices())
+                .await
+                .map_err(|e| err("getDevices", e))?
+                .unchecked_into();
+            let device = devices
+                .iter()
+                .map(|d| d.unchecked_into::<UsbDevice>())
+                .find(|d| u32::from(d.vendor_id()) == LEDGER_VENDOR_ID)
+                .ok_or_else(|| {
+                    TransportError(
+                        "no authorized Ledger: grant USB access from the page first".into(),
+                    )
+                })?;
+            Self::open_device(device).await
+        }
+
+        async fn open_device(device: UsbDevice) -> Result<Self, TransportError> {
             JsFuture::from(device.open()).await.map_err(|e| err("open", e))?;
             if device.configuration().is_none() {
                 JsFuture::from(device.select_configuration(1))
