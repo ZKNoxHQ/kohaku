@@ -277,25 +277,43 @@ impl UtxoIndexer {
                 continue;
             }
 
-            self.utxo_verifier
+            let known = self
+                .utxo_verifier
                 .verify_root(tree.number(), tree.leaves_len() as u32 - 1, tree.root())
                 .await
                 .map_err(|e| UtxoIndexerError::VerificationError(e))?;
+            // A root the contract never had means the local tree is missing or has wrong leaves:
+            // every proof built on it would revert ("Invalid Merkle Root"). Refuse to go on.
+            if !known {
+                return Err(UtxoIndexerError::VerificationError(
+                    format!(
+                        "local UTXO tree {} ({} leaves) has a root the chain never had: the local \
+                         database is inconsistent, empty the cache and sync again",
+                        tree.number(),
+                        tree.leaves_len()
+                    )
+                    .into(),
+                ));
+            }
         }
         Ok(())
     }
 
     /// Saves the current state of the indexer to the database.
+    ///
+    /// Trees are written before the synced block: if the process stops in between, the next run
+    /// resumes from the older block and re-inserts the same leaves (idempotent), instead of
+    /// believing it is synced while the saved tree lacks them.
     async fn save(&self) -> Result<(), DatabaseError> {
+        for (tree_number, tree) in self.utxo_trees.iter() {
+            self.db.set_utxo_tree(*tree_number, tree.state()).await?;
+        }
+
         let state = UtxoIndexerState {
             synced_block: self.synced_block,
             trees: self.utxo_trees.keys().cloned().collect(),
         };
         self.db.set_utxo_indexer(&state).await?;
-
-        for (tree_number, tree) in self.utxo_trees.iter() {
-            self.db.set_utxo_tree(*tree_number, tree.state()).await?;
-        }
 
         for account in self.accounts.iter() {
             self.db

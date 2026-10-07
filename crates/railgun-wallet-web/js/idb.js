@@ -28,6 +28,21 @@ async function run(name, mode, op) {
   });
 }
 
+// Deletes one wallet database (the daemon's "empty cache"). The cached connection is closed first,
+// otherwise the deletion stays blocked on it.
+export async function deleteDb(name) {
+  if (handles.has(name)) {
+    try { (await handles.get(name)).close(); } catch { /* already closed or never opened */ }
+    handles.delete(name);
+  }
+  await new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(name);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error("the database is still open elsewhere: close other tabs of this wallet"));
+  });
+}
+
 // `kohaku_db::js::JsDatabase` interface.
 export function openDb(name) {
   return {

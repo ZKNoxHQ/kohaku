@@ -11,6 +11,8 @@ pub(crate) mod keys;
 #[path = "../../railgun-wallet/src/shared.rs"]
 pub(crate) mod shared;
 
+mod ble_bridge;
 mod web;
 
+pub use ble_bridge::ble_notify;
 pub use web::api;

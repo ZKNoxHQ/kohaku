@@ -51,6 +51,8 @@ pub struct StatusSnapshot {
     /// Where the public account comes from: a derivation path, or "imported key".
     pub eoa_source: Option<String>,
     pub eoa_balance: Option<String>,
+    /// The public account is the Ledger's Ethereum app (its address may not be known yet).
+    pub eoa_ledger: bool,
     pub poi: bool,
     /// POI lists this session proves against; broadcasters requiring another are unusable.
     pub poi_list_keys: Vec<String>,

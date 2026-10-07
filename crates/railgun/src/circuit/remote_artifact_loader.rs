@@ -67,11 +67,17 @@ pub enum RemoteArtifactLoaderError {
 
 impl Default for RemoteArtifactLoader {
     fn default() -> Self {
+        // ZKNOX fork of Robert-MacWha/privacy-protocol-artifacts, pinned to a commit (never a
+        // branch) so the files cannot change under the wallet: transaction circuits unchanged,
+        // POI circuits regenerated from railgun-ppoi-circuit-artifacts 0.0.1 (see
+        // artifacts/railgun/poi/PROVENANCE.md there). To update: regenerate with
+        // bin/convert_artifacts.rs, push, and bump the commit here.
+        //
         // raw.githubusercontent.com serves the files directly with
         // `access-control-allow-origin: *`. The github.com/.../raw/ form
         // 301-redirects with no CORS header, which fails browser (wasm) fetches.
         Self::new(
-            "https://raw.githubusercontent.com/Robert-MacWha/privacy-protocol-artifacts/main/artifacts/",
+            "https://raw.githubusercontent.com/simonmasson/privacy-protocol-artifacts/14ccd6a405228c4aa4e264c7a6fa3aa54246ecda/artifacts/",
         )
     }
 }

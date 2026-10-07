@@ -550,7 +550,16 @@ pub mod webusb {
 
     /// A WebUSB-connected Ledger. [`WebUsbLedger::connect`] shows the browser's
     /// device picker (filtered to Ledger), opens the device and claims the pipe.
+    ///
+    /// The open pipe sits in a `RefCell` so [`Exchange::reconnect`] can replace it in place:
+    /// a Ledger re-enumerates on USB whenever an app opens or closes (switching between the
+    /// Railgun and Ethereum apps, say), which kills the old handle.
     pub struct WebUsbLedger {
+        pipe: std::cell::RefCell<Pipe>,
+    }
+
+    #[derive(Clone)]
+    struct Pipe {
         device: UsbDevice,
         endpoint_in: u8,
         endpoint_out: u8,
@@ -587,7 +596,7 @@ pub mod webusb {
                 .map_err(|e| err("requestDevice (cancelled or no device?)", e))?
                 .unchecked_into();
 
-            Self::open_device(device).await
+            Ok(Self { pipe: std::cell::RefCell::new(open_device(device).await?) })
         }
 
         /// Opens a Ledger this origin is already authorized for, without the picker — the page
@@ -595,6 +604,13 @@ pub mod webusb {
         /// This is the worker-side entry: `getDevices()` works in a dedicated worker, where
         /// `requestDevice()` does not exist.
         pub async fn connect_existing() -> Result<Self, TransportError> {
+            Ok(Self { pipe: std::cell::RefCell::new(authorized_pipe().await?) })
+        }
+    }
+
+    /// Opens the Ledger this origin is already authorized for (`getDevices`, no picker).
+    async fn authorized_pipe() -> Result<Pipe, TransportError> {
+        {
             let usb = usb_handle()?;
             let devices: Array = JsFuture::from(usb.get_devices())
                 .await
@@ -609,11 +625,15 @@ pub mod webusb {
                         "no authorized Ledger: grant USB access from the page first".into(),
                     )
                 })?;
-            Self::open_device(device).await
+            open_device(device).await
         }
+    }
 
-        async fn open_device(device: UsbDevice) -> Result<Self, TransportError> {
-            JsFuture::from(device.open()).await.map_err(|e| err("open", e))?;
+    async fn open_device(device: UsbDevice) -> Result<Pipe, TransportError> {
+        {
+            if !device.opened() {
+                JsFuture::from(device.open()).await.map_err(|e| err("open", e))?;
+            }
             if device.configuration().is_none() {
                 JsFuture::from(device.select_configuration(1))
                     .await
@@ -630,7 +650,7 @@ pub mod webusb {
                 .await
                 .map_err(|e| err("claimInterface", e))?;
 
-            Ok(Self { device, endpoint_in, endpoint_out })
+            Ok(Pipe { device, endpoint_in, endpoint_out })
         }
     }
 
@@ -667,16 +687,26 @@ pub mod webusb {
 
     #[async_trait::async_trait(?Send)]
     impl Exchange for WebUsbLedger {
+        async fn reconnect(&self) -> Result<(), TransportError> {
+            let stale = self.pipe.borrow().device.clone();
+            // Best effort: the old handle is usually already dead after a re-enumeration.
+            let _ = JsFuture::from(stale.close()).await;
+            let fresh = authorized_pipe().await?;
+            *self.pipe.borrow_mut() = fresh;
+            Ok(())
+        }
+
         async fn exchange(&self, apdu: &Apdu) -> Result<ApduResponse, TransportError> {
+            // Cloned out of the cell: no borrow is held across an await.
+            let Pipe { device, endpoint_in, endpoint_out } = self.pipe.borrow().clone();
             let mut raw = Vec::with_capacity(5 + apdu.data.len());
             raw.extend_from_slice(&[apdu.cla, apdu.ins, apdu.p1, apdu.p2, apdu.data.len() as u8]);
             raw.extend_from_slice(&apdu.data);
 
             for pkt in usb_framing::pack(CHANNEL, &raw) {
                 let mut buf = pkt;
-                let promise = self
-                    .device
-                    .transfer_out_with_u8_slice(self.endpoint_out, &mut buf[..])
+                let promise = device
+                    .transfer_out_with_u8_slice(endpoint_out, &mut buf[..])
                     .map_err(|e| err("transferOut call", e))?;
                 JsFuture::from(promise)
                     .await
@@ -686,7 +716,7 @@ pub mod webusb {
             let mut re = usb_framing::Reassembler::new(CHANNEL);
             let response = loop {
                 let result: UsbInTransferResult =
-                    JsFuture::from(self.device.transfer_in(self.endpoint_in, PACKET_SIZE as u32))
+                    JsFuture::from(device.transfer_in(endpoint_in, PACKET_SIZE as u32))
                         .await
                         .map_err(|e| err("transferIn", e))?
                         .unchecked_into();
@@ -718,7 +748,7 @@ pub mod webusb {
 /// (Web Bluetooth) transports. Pure — no platform APIs — so it is unit-tested
 /// off-device. Same protocol as the JS `@ledgerhq/devices` BLE transport.
 #[cfg(any(feature = "webble", test))]
-mod ble_framing {
+pub mod ble_framing {
     pub const TAG_APDU: u8 = 0x05;
     pub const TAG_MTU: u8 = 0x08;
     pub const DEFAULT_MTU: usize = 23;

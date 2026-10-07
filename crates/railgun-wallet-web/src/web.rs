@@ -34,7 +34,7 @@ use railgun::{
     builder::RailgunBuilder,
     caip::AssetId,
     chain_config::ChainConfig,
-    provider::RailgunProvider,
+    provider::{RailgunProvider, RailgunProviderError},
     transact::{RelayAction, TransactionBuilder},
 };
 use railgun_broadcaster::{
@@ -86,6 +86,8 @@ const FIRST_GUESS_GAS: u64 = 700_000;
 extern "C" {
     #[wasm_bindgen(js_name = openDb)]
     fn open_db(name: &str) -> JsValue;
+    #[wasm_bindgen(js_name = deleteDb, catch)]
+    async fn delete_db(name: &str) -> Result<JsValue, JsValue>;
 }
 
 // ---------------------------------------------------------------------------- request shapes
@@ -103,6 +105,8 @@ struct UnlockParams {
     ledger_transport: Option<String>,
     rpc_url: Option<String>,
     eoa_key: Option<String>,
+    /// The public account is the Ledger's Ethereum app (`m/44'/60'/0'/0/index`).
+    eoa_ledger: bool,
     poi: bool,
     bundler_url: Option<String>,
     // Stage 4 (Waku): parsed but unused for now.
@@ -186,18 +190,26 @@ enum Command {
     Unlock(Box<UnlockParams>, oneshot::Sender<Result<()>>),
     Job { id: u64, op: Op },
     Lock(oneshot::Sender<()>),
+    /// Deletes the IndexedDB database of the open wallet and locks it.
+    EmptyCache(oneshot::Sender<Result<String>>),
 }
 
 struct Session {
     chain: ChainConfig,
     provider: DynProvider,
     eoa: Option<EoaSigner>,
+    /// Set when the public account is the Ledger's Ethereum app (then `eoa` is `None`).
+    eoa_ledger: Option<LedgerEoa>,
+    /// The wallet's IndexedDB database, also holding the Ledger Ethereum address once read.
+    db: Arc<JsDatabase>,
     eoa_source: Option<String>,
     signer: Arc<dyn RailgunSigner>,
     railgun: RailgunProvider,
     derivation: &'static str,
     bundler_url: String,
     tokens: HashMap<Address, (String, u8)>,
+    /// IndexedDB database of this wallet, for "Empty cache".
+    db_name: String,
     broadcaster: Arc<BroadcasterClient>,
     /// The tab's Waku link when that is the transport, to read what happened to publishes.
     bridge: Option<Arc<railgun_broadcaster::BrowserBridge>>,
@@ -205,6 +217,21 @@ struct Session {
     silent_broadcasters: Vec<(String, web_time::Instant)>,
     /// Cleared on lock/re-unlock so the fee-monitor task of this session stops.
     monitor_alive: Arc<std::sync::atomic::AtomicBool>,
+    /// Gas limits the bundler asked for after a single proof, kept for the session so the next
+    /// operation fixes them before proving (one signature). See `prove_once_learning`.
+    learned_gas: LearnedGas,
+    /// Transaction that created each note, by (tree, leaf). A position never changes owner, so
+    /// each is looked up once. See `resolve_note_txs`.
+    note_tx: HashMap<(u32, u32), String>,
+}
+
+/// Floors learned from the bundler's post-proof estimates, per gas field.
+#[derive(Default, Clone, Copy)]
+struct LearnedGas {
+    pre_verification: u128,
+    verification: u128,
+    call: u128,
+    paymaster_verification: u128,
 }
 
 impl Drop for Session {
@@ -317,6 +344,29 @@ impl Actor {
                 }
                 self.refresh_status().await;
             }
+            Command::EmptyCache(reply) => {
+                // Queued behind any running job, like on the daemon: never deletes under a sync
+                // or a proof. Dropping the session releases the SDK's database handle.
+                let result = match self.session.take() {
+                    None => Err(anyhow!("open the wallet first: the cache is per wallet")),
+                    Some(session) => {
+                        let name = session.db_name.clone();
+                        drop(session);
+                        match delete_db(&name).await {
+                            Ok(_) => Ok(format!("IndexedDB database {name}")),
+                            Err(e) => Err(anyhow!("deleting {name}: {e:?}")),
+                        }
+                    }
+                };
+                if let Ok(mut s) = self.shared.status.write() {
+                    *s = StatusSnapshot::default();
+                    s.updated_at = now_ms();
+                }
+                if let Ok(mut l) = self.shared.legacy.write() {
+                    *l = LegacyStatus::default();
+                }
+                let _ = reply.send(result);
+            }
             Command::Lock(reply) => {
                 self.session = None;
                 if let Ok(mut s) = self.shared.status.write() {
@@ -361,10 +411,19 @@ impl Actor {
                             .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
                     (signer as Arc<dyn RailgunSigner>, "ledger")
                 }
-                "ble" | "bluetooth" => bail!(
-                    "Web Bluetooth is not available in the engine worker: use USB, or the \
-                     single-page wallet (railgun-ts) for BLE"
-                ),
+                "ble" | "bluetooth" => {
+                    // The page owns the GATT session (Web Bluetooth is main-thread-only);
+                    // shim.js connected it during the unlock click. This speaks the Ledger
+                    // framing over the page bridge.
+                    let device = crate::ble_bridge::BridgedBleLedger::connect()
+                        .await
+                        .map_err(|e| anyhow!("Ledger over BLE: {e}"))?;
+                    let signer =
+                        railgun_ledger::LedgerSigner::connect(device, RgChainId::All, p.index)
+                            .await
+                            .map_err(|e| anyhow!("Ledger Railgun app: {e}"))?;
+                    (signer as Arc<dyn RailgunSigner>, "ledger")
+                }
                 other => bail!("unknown Ledger transport {other:?} (use \"usb\" or \"ble\")"),
             }
         } else {
@@ -393,6 +452,12 @@ impl Actor {
         // Ethereum account of the same phrase at the same index.
         let eoa_key = p.eoa_key.as_deref().map(str::trim).filter(|k| !k.is_empty());
         let (eoa, eoa_source) = match (eoa_key, p.mnemonic.as_deref()) {
+            // The Ledger's Ethereum app: no key on the host, the address is read at the first
+            // shield (the Railgun app is the one open now).
+            _ if p.eoa_ledger => (
+                None,
+                Some(format!("Ledger Ethereum app ({})", railgun_ledger::eth::eth_path(p.index))),
+            ),
             (Some(k), _) => (
                 Some(EoaSigner::from_str(k).map_err(|e| anyhow!("invalid EOA key: {e}"))?),
                 Some("imported key".to_string()),
@@ -447,9 +512,20 @@ impl Actor {
         let master_key = signer.address().master_key().to_string();
         let tag = hex::encode(&Sha256::digest(master_key.as_bytes())[..8]);
         let name = format!("rgw-{}-{tag}", chain.id);
-        let db: JsDatabase = open_db(&name).unchecked_into();
+        let db: Arc<JsDatabase> = Arc::new(open_db(&name).unchecked_into());
+        let eoa_ledger = if p.eoa_ledger {
+            let cached = kohaku_db::Database::get(db.as_ref(), &ledger_eoa_key(p.index))
+                .await
+                .ok()
+                .flatten()
+                .and_then(|b| (b.len() == 20).then(|| Address::from_slice(&b)));
+            Some(LedgerEoa { index: p.index, address: cached })
+        } else {
+            None
+        };
 
-        let mut builder = RailgunBuilder::new(chain.clone(), provider.clone()).with_database(Arc::new(db));
+        let mut builder =
+            RailgunBuilder::new(chain.clone(), provider.clone()).with_database(db.clone());
         if p.poi {
             builder = builder.with_poi();
         }
@@ -518,15 +594,20 @@ impl Actor {
             provider,
             eoa,
             eoa_source,
+            eoa_ledger,
+            db,
             signer,
             railgun,
             derivation,
             bundler_url,
             tokens: HashMap::new(),
+            db_name: name,
             broadcaster,
             bridge: (waku_mode == "browser").then(|| self.shared.bridge.clone()),
             silent_broadcasters: Vec::new(),
             monitor_alive,
+            learned_gas: LearnedGas::default(),
+            note_tx: HashMap::new(),
         });
         Ok(())
     }
@@ -598,13 +679,30 @@ impl Actor {
         }
         balances.sort_by_key(|v| v["asset"].as_str().map(str::to_owned));
 
-        let notes = session
-            .railgun
-            .notes(address.clone())
-            .await
+        let entries = session.railgun.notes(address.clone()).await;
+        let positions: Vec<(u32, u32)> =
+            entries.iter().map(|n| (n.tree_number, n.leaf_index)).collect();
+        resolve_note_txs(session, &positions).await;
+        // Token symbols, read from each token contract through the session's RPC (any chain);
+        // cached per token by `token_meta`.
+        let mut symbols: HashMap<Address, String> = HashMap::new();
+        for n in &entries {
+            if let AssetId::Erc20(token) = n.asset {
+                if !symbols.contains_key(&token) {
+                    let (symbol, _) = token_meta(session, token).await;
+                    symbols.insert(token, symbol);
+                }
+            }
+        }
+        let notes = entries
             .into_iter()
             .map(|n| {
+                let symbol = match n.asset {
+                    AssetId::Erc20(token) => symbols.get(&token).cloned(),
+                    _ => None,
+                };
                 json!({
+                    "symbol": symbol,
                     "asset": n.asset.to_string(),
                     "amount": n.amount.to_string(),
                     "poiStatus": n.poi_status,
@@ -613,11 +711,12 @@ impl Actor {
                     "blindedCommitment": n.blinded_commitment,
                     "commitmentType": n.commitment_type,
                     "memo": n.memo,
+                    "txHash": session.note_tx.get(&(n.tree_number, n.leaf_index)),
                 })
             })
             .collect();
 
-        let eoa = session.eoa.as_ref().map(EoaSigner::address);
+        let eoa = eoa_address(session);
         let eoa_balance = match eoa {
             Some(a) => session
                 .provider
@@ -651,7 +750,7 @@ impl Actor {
             TransportInfo {
                 id: "direct",
                 label: "direct (debug)",
-                enabled: eoa.is_some(),
+                enabled: eoa.is_some() || session.eoa_ledger.is_some(),
                 note: "self-broadcast from the public EOA, links the EOA to the transaction".into(),
             },
         ];
@@ -664,6 +763,7 @@ impl Actor {
             eoa: eoa.map(|a| a.to_string()),
             eoa_source: session.eoa_source.clone(),
             eoa_balance,
+            eoa_ledger: session.eoa_ledger.is_some(),
             poi: session.railgun.poi_enabled(),
             poi_list_keys: session.railgun.poi_list_keys(),
             synced_block: Some(session.railgun.synced_block()),
@@ -699,6 +799,43 @@ async fn token_meta(session: &mut Session, token: Address) -> (String, u8) {
     meta
 }
 
+/// Fills `session.note_tx` with the transaction that created each of `positions`, from the
+/// subsquid indexer (`commitments` by tree and position). One query per tree for the positions
+/// not cached yet. Best effort: on any failure the notes simply show no transaction.
+async fn resolve_note_txs(session: &mut Session, positions: &[(u32, u32)]) {
+    let mut by_tree: HashMap<u32, Vec<u32>> = HashMap::new();
+    for &(tree, leaf) in positions {
+        if !session.note_tx.contains_key(&(tree, leaf)) {
+            by_tree.entry(tree).or_default().push(leaf);
+        }
+    }
+    for (tree, leaves) in by_tree {
+        let query = format!(
+            "{{ commitments(where: {{treeNumber_eq: {tree}, treePosition_in: {leaves:?}}}, limit: {}) \
+             {{ treePosition transactionHash }} }}",
+            leaves.len()
+        );
+        let answer: Result<Value> = async {
+            Ok(reqwest::Client::new()
+                .post(&session.chain.subsquid_endpoint)
+                .json(&json!({ "query": query }))
+                .send()
+                .await?
+                .json()
+                .await?)
+        }
+        .await;
+        let Ok(answer) = answer else { continue };
+        for c in answer["data"]["commitments"].as_array().into_iter().flatten() {
+            let leaf = c["treePosition"].as_u64();
+            let hash = c["transactionHash"].as_str();
+            if let (Some(leaf), Some(hash)) = (leaf, hash) {
+                session.note_tx.insert((tree, leaf as u32), hash.to_string());
+            }
+        }
+    }
+}
+
 /// Resolves the front's asset spec (`"native"` or an ERC-20 address) and a decimal amount into an
 /// `AssetId` and base units. Shielded native currency is the wrapped base token.
 async fn resolve_amount(
@@ -722,22 +859,197 @@ async fn resolve_amount(
     Ok((AssetId::Erc20(token), value, token))
 }
 
+/// The public account when it lives on the Ledger's Ethereum app.
+struct LedgerEoa {
+    index: u32,
+    /// Read from the device at the first shield, then cached in the wallet's database.
+    address: Option<Address>,
+}
+
+fn ledger_eoa_key(index: u32) -> Vec<u8> {
+    format!("zknox:ledger-eth-address:{index}").into_bytes()
+}
+
+/// The public account's address, when known.
+fn eoa_address(s: &Session) -> Option<Address> {
+    s.eoa
+        .as_ref()
+        .map(EoaSigner::address)
+        .or_else(|| s.eoa_ledger.as_ref().and_then(|l| l.address))
+}
+
+/// How the public account signs, resolved once per operation.
+enum EoaSigning {
+    /// A key on the host: the provider's wallet signs.
+    Local,
+    /// The Ledger's Ethereum app, reached over this connection.
+    Ledger {
+        device: railgun_ledger::transport::webusb::WebUsbLedger,
+        path: String,
+        address: Address,
+    },
+}
+
+/// How long a switch between Ledger apps may take (it includes a possible confirmation on the
+/// device, or a manual switch when the device does not take commands).
+const APP_SWITCH_WAIT_MS: u64 = 180_000;
+
+/// Brings `want` to the front on the Ledger and returns a connection to it.
+///
+/// Drives the device itself where it can: closes the running app (`quit_app`, no confirmation),
+/// then launches `want` from the dashboard (`open_app`, a confirmation on some firmwares). Each
+/// switch re-enumerates the device on USB, so every round opens a fresh connection. When the
+/// device does not take these commands, or the user declines, it falls back to asking for a
+/// manual switch and waits for it.
+async fn switch_app(
+    shared: &SharedRef,
+    id: u64,
+    want: &str,
+    wait_ms: u64,
+) -> Result<railgun_ledger::transport::webusb::WebUsbLedger> {
+    use railgun_ledger::{eth, protocol::ProtocolError, transport::webusb::WebUsbLedger};
+    let deadline = now_ms() + wait_ms;
+    let (mut quit_sent, mut open_sent, mut asked) = (false, false, false);
+    let mut last_seen = String::new();
+    loop {
+        if let Ok(device) = WebUsbLedger::connect_existing().await {
+            match eth::current_app(&device).await {
+                Ok((name, version)) if name == want => {
+                    push_step(shared, id, format!("Ledger: {want} app {version} open"));
+                    return Ok(device);
+                }
+                Ok((name, _)) if name == eth::DASHBOARD_NAME && !open_sent => {
+                    open_sent = true;
+                    push_step(
+                        shared,
+                        id,
+                        format!("Ledger: opening the {want} app (confirm on the device if asked)"),
+                    );
+                    match eth::open_app(&device, want).await {
+                        Ok(()) => {}
+                        Err(ProtocolError::Status {
+                            status: eth::STATUS_APP_NOT_INSTALLED,
+                        }) => bail!("the {want} app is not installed on this Ledger"),
+                        Err(e) => push_step(
+                            shared,
+                            id,
+                            format!("Ledger did not open {want} ({e}): open it on the device"),
+                        ),
+                    }
+                }
+                Ok((name, _)) if name != eth::DASHBOARD_NAME && !quit_sent => {
+                    quit_sent = true;
+                    push_step(shared, id, format!("Ledger: closing the {name} app"));
+                    let _ = eth::quit_app(&device).await;
+                }
+                Ok((name, _)) => {
+                    if (open_sent || quit_sent) && !asked && name != last_seen {
+                        asked = true;
+                        push_step(
+                            shared,
+                            id,
+                            format!("Ledger shows {name:?}: open the {want} app on the device"),
+                        );
+                    }
+                    last_seen = name;
+                }
+                Err(_) => {}
+            }
+        }
+        if now_ms() > deadline {
+            bail!("the Ledger did not switch to the {want} app in time: nothing was signed");
+        }
+        gloo_timers::future::TimeoutFuture::new(1_000).await;
+    }
+}
+
+async fn open_eth_app(
+    shared: &SharedRef,
+    id: u64,
+) -> Result<railgun_ledger::transport::webusb::WebUsbLedger> {
+    push_step(
+        shared,
+        id,
+        "Ledger: switching to the Ethereum app (Blind signing must be enabled in its settings)"
+            .into(),
+    );
+    switch_app(shared, id, railgun_ledger::eth::ETHEREUM_APP_NAME, APP_SWITCH_WAIT_MS).await
+}
+
+/// After public transactions signed on the Ethereum app: back to the Railgun app, best effort
+/// (the next private operation reconnects to it). Never fails the operation.
+async fn back_to_railgun_app(shared: &SharedRef, id: u64, signing: &EoaSigning) {
+    if !matches!(signing, EoaSigning::Ledger { .. }) {
+        return;
+    }
+    let name = railgun_ledger::eth::RAILGUN_APP_NAME;
+    if switch_app(shared, id, name, 60_000).await.is_err() {
+        push_step(
+            shared,
+            id,
+            format!("reopen the {name} app on the Ledger for private operations"),
+        );
+    }
+}
+
+/// Resolves how this operation's public transactions get signed. For the Ledger, waits for the
+/// Ethereum app, reads the account's address and caches it.
+async fn eoa_signing(s: &mut Session, shared: &SharedRef, id: u64) -> Result<(EoaSigning, Address)> {
+    if let Some(eoa) = &s.eoa {
+        return Ok((EoaSigning::Local, eoa.address()));
+    }
+    let Some(ledger) = &s.eoa_ledger else {
+        bail!("no public account: unlock with a public key, a phrase, or the Ledger Ethereum app");
+    };
+    let index = ledger.index;
+    let previous = ledger.address;
+    let device = open_eth_app(shared, id).await?;
+    let path = railgun_ledger::eth::eth_path(index);
+    let (_, address) = railgun_ledger::eth::get_address(&device, &path, false)
+        .await
+        .map_err(|e| anyhow!("Ledger Ethereum app: {e}"))?;
+    let address = Address::from_str(&address).map_err(|e| anyhow!("Ledger address: {e}"))?;
+    if let Some(prev) = previous {
+        if prev != address {
+            push_step(
+                shared,
+                id,
+                format!("the Ledger account is now {address} (was {prev}): another device or passphrase?"),
+            );
+        }
+    }
+    push_step(shared, id, format!("public account {address} ({path})"));
+    let _ = kohaku_db::Database::set(s.db.as_ref(), &ledger_eoa_key(index), address.as_slice()).await;
+    if let Some(l) = s.eoa_ledger.as_mut() {
+        l.address = Some(address);
+    }
+    Ok((EoaSigning::Ledger { device, path, address }, address))
+}
+
 async fn send_eoa(
     s: &Session,
     shared: &SharedRef,
     id: u64,
+    signing: &EoaSigning,
     label: &str,
     tx: TxData,
 ) -> Result<B256> {
-    if s.eoa.is_none() {
-        bail!("no public EOA key configured, cannot send {label} transaction");
-    }
-    push_step(shared, id, format!("sending {label} transaction from EOA"));
-    let pending = s
-        .provider
-        .send_transaction(tx.into())
-        .await
-        .with_context(|| format!("{label}: eth_sendTransaction"))?;
+    let pending = match signing {
+        EoaSigning::Local => {
+            push_step(shared, id, format!("sending {label} transaction from EOA"));
+            s.provider
+                .send_transaction(tx.into())
+                .await
+                .with_context(|| format!("{label}: eth_sendTransaction"))?
+        }
+        EoaSigning::Ledger { device, path, address } => {
+            let raw = ledger_sign_tx(s, shared, id, device, path, *address, label, tx).await?;
+            s.provider
+                .send_raw_transaction(&raw)
+                .await
+                .with_context(|| format!("{label}: eth_sendRawTransaction"))?
+        }
+    };
     let hash = *pending.tx_hash();
     push_step(shared, id, format!("{label} tx {hash} sent, waiting for inclusion"));
     let receipt = pending
@@ -755,6 +1067,83 @@ async fn send_eoa(
     Ok(hash)
 }
 
+/// Builds an EIP-1559 transaction for `tx` (nonce, fees and gas from the RPC), has the Ledger
+/// Ethereum app sign it, and returns the raw signed transaction. The signer is authenticated:
+/// the address recovered from the signature must be `from`.
+#[allow(clippy::too_many_arguments)]
+async fn ledger_sign_tx(
+    s: &Session,
+    shared: &SharedRef,
+    id: u64,
+    device: &railgun_ledger::transport::webusb::WebUsbLedger,
+    path: &str,
+    from: Address,
+    label: &str,
+    tx: TxData,
+) -> Result<Vec<u8>> {
+    use alloy::{
+        consensus::{SignableTransaction, TxEip1559, TxEnvelope},
+        eips::eip2718::Encodable2718,
+        primitives::{Signature, TxKind},
+    };
+
+    let nonce = s
+        .provider
+        .get_transaction_count(from)
+        .pending()
+        .await
+        .context("public account nonce")?;
+    let fees = s
+        .provider
+        .estimate_eip1559_fees()
+        .await
+        .context("fee estimate")?;
+    let request = alloy::rpc::types::TransactionRequest::default()
+        .from(from)
+        .to(tx.to)
+        .input(tx.data.clone().into())
+        .value(tx.value);
+    let gas = s
+        .provider
+        .estimate_gas(request)
+        .await
+        .with_context(|| format!("{label}: gas estimate"))?;
+    let unsigned = TxEip1559 {
+        chain_id: s.chain.id,
+        nonce,
+        gas_limit: gas + gas / 5,
+        max_fee_per_gas: fees.max_fee_per_gas,
+        max_priority_fee_per_gas: fees.max_priority_fee_per_gas,
+        to: TxKind::Call(tx.to),
+        value: tx.value,
+        access_list: Default::default(),
+        input: tx.data,
+    };
+    let mut payload = Vec::new();
+    unsigned.encode_for_signing(&mut payload);
+
+    push_step(
+        shared,
+        id,
+        format!("{label}: review and approve on the Ledger (Ethereum app, blind signing)"),
+    );
+    let raw = railgun_ledger::eth::sign_transaction(device, path, &payload)
+        .await
+        .map_err(|e| anyhow!("Ledger Ethereum app ({label}): {e}"))?;
+
+    let sighash = unsigned.signature_hash();
+    let (r, sv) = (U256::from_be_bytes(raw.r), U256::from_be_bytes(raw.s));
+    let signature = [false, true]
+        .into_iter()
+        .map(|parity| Signature::new(r, sv, parity))
+        .find(|sig| sig.recover_address_from_prehash(&sighash).ok() == Some(from))
+        .ok_or_else(|| {
+            anyhow!("the Ledger signature does not come from {from}: different account or device")
+        })?;
+    let envelope: TxEnvelope = unsigned.into_signed(signature).into();
+    Ok(envelope.encoded_2718())
+}
+
 async fn shield(
     s: &mut Session,
     shared: &SharedRef,
@@ -762,13 +1151,46 @@ async fn shield(
     asset: &str,
     amount: &str,
 ) -> Result<Value> {
-    let eoa = s
-        .eoa
-        .as_ref()
-        .map(EoaSigner::address)
-        .ok_or_else(|| anyhow!("shielding needs a public EOA key"))?;
+    let (signing, eoa) = eoa_signing(s, shared, id).await?;
+    // Whatever happens once on the Ethereum app, hand the device back to the Railgun app.
+    let result = shield_signed(s, shared, id, &signing, eoa, asset, amount).await;
+    back_to_railgun_app(shared, id, &signing).await;
+    let hashes = result?;
+    post_tx_sync(s, shared, id).await;
+    Ok(json!({ "txHashes": hashes.iter().map(|h| h.to_string()).collect::<Vec<_>>() }))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn shield_signed(
+    s: &mut Session,
+    shared: &SharedRef,
+    id: u64,
+    signing: &EoaSigning,
+    eoa: Address,
+    asset: &str,
+    amount: &str,
+) -> Result<Vec<B256>> {
     let is_native = asset.trim().eq_ignore_ascii_case("native");
     let (asset_id, value, token) = resolve_amount(s, asset, amount).await?;
+
+    // A shield is a public transaction from this account: it pays the gas in the native
+    // currency, plus the amount itself for a native shield. Say so before anything is signed.
+    let native_balance = s.provider.get_balance(eoa).await.context("public account balance")?;
+    let fmt = |v: U256| trim_decimal(format_units(v, 18u8).unwrap_or_default());
+    if native_balance.is_zero() {
+        bail!(
+            "the public account {eoa} has no native currency to pay the gas: fund it, then \
+             retry (nothing was signed)"
+        );
+    }
+    if is_native && native_balance <= U256::from(value) {
+        bail!(
+            "the public account {eoa} holds {} native, the shield needs {} plus gas (nothing \
+             was signed)",
+            fmt(native_balance),
+            fmt(U256::from(value))
+        );
+    }
     let recipient = s.signer.address();
 
     let mut hashes = Vec::new();
@@ -793,7 +1215,7 @@ async fn shield(
                     .into(),
                 U256::ZERO,
             );
-            hashes.push(send_eoa(s, shared, id, "approve", approve).await?);
+            hashes.push(send_eoa(s, shared, id, signing, "approve", approve).await?);
         }
         s.railgun
             .shield()
@@ -802,10 +1224,9 @@ async fn shield(
     };
 
     for tx in txs {
-        hashes.push(send_eoa(s, shared, id, "shield", tx).await?);
+        hashes.push(send_eoa(s, shared, id, signing, "shield", tx).await?);
     }
-    post_tx_sync(s, shared, id).await;
-    Ok(json!({ "txHashes": hashes.iter().map(|h| h.to_string()).collect::<Vec<_>>() }))
+    Ok(hashes)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -860,6 +1281,101 @@ async fn unshield(
     submit(s, shared, id, builder, transport, calls, Some(sender), fee_limits).await
 }
 
+/// Proofs (hence Ledger signatures) allowed per operation on the single-proof path: the first,
+/// plus one re-proof per gas field the bundler finds too low after the fact.
+const SINGLE_PROOF_ATTEMPTS: usize = 3;
+
+/// Single-proof 4337 preparation that learns the bundler's requirements.
+///
+/// The fee is bound into the proof, so the gas limits must be fixed before proving. They come
+/// from our own simulation, but the bundler's estimate can exceed it (Pimlico pads verification
+/// by its own search ladder and multiplier: on 2026-10-07 it asked 220,825 for an account
+/// verification measured at ~10k). That estimate is only available once a proof exists. On a
+/// "limits too low" answer the bundler's figure is recorded and the operation re-proved with it;
+/// the figures are kept for the session, so later operations fix them up front and sign once.
+#[allow(clippy::too_many_arguments)]
+async fn prove_once_learning(
+    s: &mut Session,
+    shared: &SharedRef,
+    id: u64,
+    builder: &TransactionBuilder,
+    bundler: &PimlicoBundler,
+    account: &SimpleSmartAccount,
+    signer: Arc<dyn RailgunSigner>,
+    fee_token: Address,
+    calls: &Vec<Call>,
+    has_call: bool,
+    margin: u32,
+) -> Result<userop_kit::signable_user_operation::SignableUserOperation, RailgunProviderError> {
+    let (mut gas, _) = s
+        .railgun
+        .simulate_gas_limits(
+            builder,
+            bundler as &dyn Bundler,
+            account,
+            signer.clone(),
+            fee_token,
+            calls,
+            has_call,
+            margin,
+            &mut rand::rng(),
+        )
+        .await?;
+
+    for attempt in 1..=SINGLE_PROOF_ATTEMPTS {
+        let l = s.learned_gas;
+        gas.pre_verification_gas = gas.pre_verification_gas.max(l.pre_verification);
+        gas.verification_gas_limit = gas.verification_gas_limit.max(l.verification);
+        gas.call_gas_limit = gas.call_gas_limit.max(l.call);
+        gas.paymaster_verification_gas_limit = Some(
+            gas.paymaster_verification_gas_limit
+                .unwrap_or(0)
+                .max(l.paymaster_verification),
+        );
+
+        match s
+            .railgun
+            .prepare_userop_single_proof(
+                builder.clone(),
+                bundler as &dyn Bundler,
+                account,
+                signer.clone(),
+                fee_token,
+                calls.clone(),
+                gas,
+                &mut rand::rng(),
+            )
+            .await
+        {
+            Ok((signable, _report)) => return Ok(signable),
+            Err(RailgunProviderError::LimitsTooLow { what, needed, limit })
+                if attempt < SINGLE_PROOF_ATTEMPTS =>
+            {
+                let learned = &mut s.learned_gas;
+                let slot = match what {
+                    "pre-verification" => &mut learned.pre_verification,
+                    "account verification" => &mut learned.verification,
+                    "call" => &mut learned.call,
+                    "paymaster verification" => &mut learned.paymaster_verification,
+                    _ => return Err(RailgunProviderError::LimitsTooLow { what, needed, limit }),
+                };
+                *slot = (*slot).max(needed);
+                push_step(
+                    shared,
+                    id,
+                    format!(
+                        "the bundler wants {needed} gas for {what} (limit was {limit}): nothing \
+                         was sent; proving again with it (one more signature), remembered for \
+                         the next operations of this session"
+                    ),
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("the last attempt returns")
+}
+
 /// Proves and submits a private transaction over the selected transport.
 #[allow(clippy::too_many_arguments)]
 async fn submit(
@@ -883,13 +1399,18 @@ async fn submit(
             submit_legacy(s, shared, id, builder, fee_limits).await?
         }
         Transport::Direct => {
-            if s.eoa.is_none() {
-                bail!("direct transport needs a public EOA key");
+            if s.eoa.is_none() && s.eoa_ledger.is_none() {
+                bail!("direct transport needs a public account");
             }
+            // Prove first: the spending signature comes from the Railgun app; only then is the
+            // Ethereum app needed, to send.
             push_step(shared, id, "building and proving (direct transport)".into());
             let proved = s.railgun.build(builder, &mut rand::rng()).await?;
             push_step(shared, id, format!("proved {} operation(s)", proved.proved_operations.len()));
-            let hash = send_eoa(s, shared, id, "transact", proved.tx_data).await?;
+            let (signing, _) = eoa_signing(s, shared, id).await?;
+            let sent = send_eoa(s, shared, id, &signing, "transact", proved.tx_data).await;
+            back_to_railgun_app(shared, id, &signing).await;
+            let hash = sent?;
             json!({ "transport": "direct", "txHash": hash.to_string() })
         }
         Transport::Erc4337 => {
@@ -932,26 +1453,26 @@ async fn submit(
                         sender.address()
                     ),
                 );
-                match s
-                    .railgun
-                    .prepare_userop_single(
-                        builder.clone(),
-                        &bundler as &dyn Bundler,
-                        &account,
-                        railgun_signer.clone(),
-                        fee_token,
-                        calls.clone(),
-                        has_call,
-                        margin,
-                        &mut rand::rng(),
-                    )
-                    .await
+                match prove_once_learning(
+                    s,
+                    shared,
+                    id,
+                    &builder,
+                    &bundler,
+                    &account,
+                    railgun_signer.clone(),
+                    fee_token,
+                    &calls,
+                    has_call,
+                    margin,
+                )
+                .await
                 {
                     Ok(signable) => (signable, "single-proof"),
                     Err(e) if fee_limits.single_proof_strict => {
                         return Err(anyhow!(e).context(
-                            "gas limits could not be simulated and falling back to several \
-                             signatures is disabled. Nothing was signed",
+                            "the single-proof path failed and falling back to several \
+                             signatures is disabled. Nothing was sent",
                         ));
                     }
                     Err(e) => {
@@ -1637,7 +2158,15 @@ async fn route(method: &str, path: &str, body: &str) -> Result<Value, String> {
             rx.await.map_err(|_| "engine dropped the request".to_string())?;
             Ok(json!({ "ok": true }))
         }
-        "/api/empty-cache" => Err("empty-cache is not wired yet".into()),
+        "/api/empty-cache" => {
+            let (tx, rx) = oneshot::channel();
+            send(Command::EmptyCache(tx)).map_err(|e| format!("{e:#}"))?;
+            match rx.await {
+                Ok(Ok(removed)) => Ok(json!({ "ok": true, "removed": removed })),
+                Ok(Err(e)) => Err(format!("{e:#}")),
+                Err(_) => Err("engine dropped the request".into()),
+            }
+        }
         "/api/waku/exchange" => waku_exchange(&sh, body),
         other => match other.strip_prefix("/api/jobs/") {
             Some(id) => id

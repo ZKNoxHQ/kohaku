@@ -17,6 +17,7 @@
 //!   must match.
 //! - [`signer::LedgerSigner`] — implements `railgun`'s `RailgunSigner` on top of the above.
 
+pub mod eth;
 pub mod protocol;
 pub mod signer;
 pub mod transport;

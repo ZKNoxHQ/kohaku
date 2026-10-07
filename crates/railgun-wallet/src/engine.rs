@@ -1658,13 +1658,27 @@ impl Session {
         }
         balances.sort_by_key(|v| v["asset"].as_str().map(str::to_owned));
 
-        let notes = self
-            .railgun
-            .notes(address)
-            .await
+        let entries = self.railgun.notes(address).await;
+        // Token symbols, read from each token contract through the session's RPC (any chain);
+        // cached per token by `token_meta`.
+        let mut symbols: HashMap<Address, String> = HashMap::new();
+        for n in &entries {
+            if let AssetId::Erc20(token) = n.asset {
+                if !symbols.contains_key(&token) {
+                    let meta = self.token_meta(token).await;
+                    symbols.insert(token, meta.symbol);
+                }
+            }
+        }
+        let notes = entries
             .into_iter()
             .map(|n| {
+                let symbol = match n.asset {
+                    AssetId::Erc20(token) => symbols.get(&token).cloned(),
+                    _ => None,
+                };
                 json!({
+                    "symbol": symbol,
                     "asset": n.asset.to_string(),
                     "amount": n.amount.to_string(),
                     "poiStatus": n.poi_status,
@@ -1726,6 +1740,8 @@ impl Session {
             eoa: eoa.map(|a| a.to_string()),
             eoa_source: self.eoa_source.clone(),
             eoa_balance,
+            // The daemon's public account is a host key; the Ledger Ethereum app is web-only.
+            eoa_ledger: false,
             poi: self.railgun.poi_enabled(),
             poi_list_keys: self.railgun.poi_list_keys(),
             synced_block: Some(self.railgun.synced_block()),

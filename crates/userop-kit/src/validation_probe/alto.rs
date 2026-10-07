@@ -45,7 +45,9 @@ impl AltoPolicy {
         search_allowance: 30_000_000,
         search_tolerance: 10_000,
         call_multiplier_percent: 220,
-        verification_multiplier_percent: 135,
+        // 135% when calibrated on 2026-09-20; 175% observed on 2026-10-07 (an account
+        // verification estimate of 220,825 = ladder 126,186 x 175%, the only exact fit).
+        verification_multiplier_percent: 175,
     };
 
     /// Value alto's search returns when the smallest limit that works is `minimal`: the lowest

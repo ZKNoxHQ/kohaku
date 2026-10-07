@@ -77,6 +77,8 @@ fn status_name(status: u16) -> &'static str {
         0x6985 => "denied by user",
         0x6a86 => "wrong P1/P2",
         0x6a87 => "wrong data length",
+        0x6a80 => "invalid data (Ethereum app: enable Blind signing in its settings to sign \
+                   contract calls it cannot decode)",
         0x6d00 => "instruction not supported (wrong app?)",
         0x6e00 => "class not supported (wrong app?)",
         _ => "unknown status",

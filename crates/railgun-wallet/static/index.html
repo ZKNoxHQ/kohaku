@@ -190,6 +190,8 @@ details summary { cursor: pointer; color: var(--steel); font-size: .88rem; margi
     <label for="f-eoa">Public account private key (optional)</label>
     <input type="password" id="f-eoa" autocomplete="off" placeholder="0x…">
     <p class="hint">Leave empty to use the Ethereum account of the same phrase (m/44'/60'/0'/0/index, as MetaMask or Ledger Live derive it). It pays the gas for shielding. A key entered here replaces it. The accounts of the test phrase are public too: anything sent to them can be taken by anyone.</p>
+    <label class="check"><input type="checkbox" id="f-eoa-ledger"> Public account on the Ledger (Ethereum app)</label>
+    <p class="hint">Shields are signed by the Ledger's Ethereum app (account m/44'/60'/0'/0/index), over USB. The device runs one app at a time: when you shield, the wallet asks you to open the Ethereum app, then to reopen the Railgun app. Enable <b>Blind signing</b> in the Ethereum app's settings: it cannot decode the shield call.</p>
 
     <div class="row">
       <div><label for="f-bundler">Bundler URL (4337)</label><input type="text" id="f-bundler" autocomplete="off"></div>
@@ -390,6 +392,7 @@ function loadPrefs() {
     try { const v = localStorage.getItem("rgw:" + id); if (v !== null) $(id).value = v; } catch {}
   }
   try { const p = localStorage.getItem("rgw:f-poi"); if (p !== null) $("f-poi").checked = p === "1"; } catch {}
+  try { $("f-eoa-ledger").checked = localStorage.getItem("rgw:f-eoa-ledger") === "1"; } catch {}
   // 0.12.0: the native node replaces the one of the page as default, once, for stored "browser".
   try {
     if (localStorage.getItem("rgw:native-waku-default") === null) {
@@ -401,6 +404,7 @@ function loadPrefs() {
 function savePrefs() {
   for (const id of PREFS) { try { localStorage.setItem("rgw:" + id, $(id).value); } catch {} }
   try { localStorage.setItem("rgw:f-poi", $("f-poi").checked ? "1" : "0"); } catch {}
+  try { localStorage.setItem("rgw:f-eoa-ledger", $("f-eoa-ledger").checked ? "1" : "0"); } catch {}
 }
 
 function poiTag(status, poiOn) {
@@ -426,17 +430,42 @@ function renderBalances(s) {
   box.append(table);
 }
 
+// Block explorer per chain id, for the notes' transaction links.
+const EXPLORERS = {
+  1: "https://etherscan.io",
+  11155111: "https://sepolia.etherscan.io",
+  137: "https://polygonscan.com",
+  56: "https://bscscan.com",
+  42161: "https://arbiscan.io",
+};
+
+// Transaction that created a note: short hash linking to the explorer (full hash on hover).
+function txCell(hash, chainId) {
+  if (!hash) return h("td", { class: "empty", text: "—" });
+  const short = hash.slice(0, 10) + "…" + hash.slice(-6);
+  const explorer = EXPLORERS[chainId];
+  if (!explorer) return h("td", { class: "addr", text: short, title: hash });
+  return h("td", { class: "addr" },
+    h("a", { href: `${explorer}/tx/${hash}`, text: short, title: hash, target: "_blank", rel: "noopener noreferrer" }));
+}
+
+// Token of a note: its symbol when known (full asset id on hover), else the asset id.
+function assetCell(n) {
+  return n.symbol ? h("td", { text: n.symbol, title: n.asset }) : h("td", { class: "addr", text: n.asset });
+}
+
 function renderNotes(s) {
   const box = $("notes"); box.replaceChildren();
   if (!s.notes.length) { box.append(h("p", { class: "empty", text: "No unspent note." })); return; }
-  const table = h("table", {}, h("tr", {}, h("th", { text: "Tree / leaf" }), h("th", { text: "Asset" }), h("th", { class: "num", text: "Base units" }), h("th", { text: "Type" }), h("th", { text: "Status" })));
+  const table = h("table", {}, h("tr", {}, h("th", { text: "Tree / leaf" }), h("th", { text: "Token" }), h("th", { class: "num", text: "Base units" }), h("th", { text: "Type" }), h("th", { text: "Status" }), h("th", { text: "Transaction" })));
   for (const n of s.notes) {
     table.append(h("tr", {},
       h("td", { text: `${n.treeNumber} / ${n.leafIndex}` }),
-      h("td", { class: "addr", text: n.asset }),
+      assetCell(n),
       h("td", { class: "num", text: n.amount }),
       h("td", { text: String(n.commitmentType) + (n.memo ? ` (${n.memo})` : "") }),
-      h("td", {}, poiTag(n.poiStatus, s.poi))));
+      h("td", {}, poiTag(n.poiStatus, s.poi)),
+      txCell(n.txHash, s.chainId)));
   }
   box.append(table);
 }
@@ -601,9 +630,9 @@ function render() {
   const chain = { 1: "mainnet", 11155111: "Sepolia" }[s.chainId] || `chain ${s.chainId}`;
   $("hdr-meta").textContent = `${chain}, synced to block ${s.syncedBlock ?? "?"}, keys: ${s.derivation}` + (busy ? `, running ${state.activeJob.kind}` : "");
   $("zk-addr").textContent = s.address;
-  $("eoa-addr").textContent = s.eoa || "none (shielding disabled)";
+  $("eoa-addr").textContent = s.eoa || (s.eoaLedger ? "on the Ledger (Ethereum app): read at the first shield" : "none (shielding disabled)");
   $("eoa-bal").textContent = [s.eoaBalance != null ? `${s.eoaBalance} native` : null, s.eoaSource].filter(Boolean).join(", ");
-  $("btn-shield").disabled = busy || !s.eoa;
+  $("btn-shield").disabled = busy || !(s.eoa || s.eoaLedger);
   renderBalances(s); renderNotes(s); renderPoi(s); renderTransports(s); renderLegacy(s);
   $("btn-transfer").disabled = busy || !state.transportUsable;
   $("btn-unshield").disabled = busy || !state.transportUsable;
@@ -649,6 +678,8 @@ $("f-source").addEventListener("change", () => {
   $("wrap-derivation").hidden = ledger;
   $("wrap-rawkeys").hidden = ledger;
   $("ledger-hint").hidden = !ledger;
+  // A Ledger unlock signs public transactions with the same device (Ethereum app).
+  if (ledger) $("f-eoa-ledger").checked = true;
 });
 
 $("btn-unlock").addEventListener("click", async () => {
@@ -671,7 +702,7 @@ $("btn-unlock").addEventListener("click", async () => {
       spendingKey: ledger ? null : ($("f-spend").value.trim() || null),
       viewingKey: ledger ? null : ($("f-view").value.trim() || null),
       derivation: $("f-derivation").value, index: Number($("f-index").value || 0),
-      eoaKey: $("f-eoa").value.trim() || null, poi: $("f-poi").checked,
+      eoaKey: $("f-eoa").value.trim() || null, eoaLedger: $("f-eoa-ledger").checked, poi: $("f-poi").checked,
       bundlerUrl: $("f-bundler").value.trim() || null,
       wakuUrl: $("f-waku").value.trim() || null,
       wakuMode: $("f-wakumode").value,
