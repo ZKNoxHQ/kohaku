@@ -124,6 +124,13 @@ pub const VERIFICATION_BYPASS: Address =
     alloy::primitives::address!("0x000000000000000000000000000000000000dEaD");
 
 /// Interfaces with the RAILGUN protocol.
+/// ZKNOX viewer: railgun txid (`0x` + 64 hex digits) of an operation read from an indexer
+/// (subsquid `Transaction`), for operations the txid indexer did not retain.
+pub fn railgun_txid_hex(nullifiers: &[U256], commitments: &[U256], bound_params_hash: U256) -> String {
+    let txid: U256 = crate::crypto::railgun_txid::Txid::new(nullifiers, commitments, bound_params_hash).into();
+    format!("0x{txid:064x}")
+}
+
 pub struct RailgunProvider {
     chain: ChainConfig,
     provider: Arc<dyn Eip1193Provider>,

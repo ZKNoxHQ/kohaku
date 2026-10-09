@@ -245,6 +245,50 @@ impl SpendingPublicKey {
         left.x == right.x && left.y == right.y
     }
 
+    /// ZKNOX fork: circomlib `packPoint` form (the community engine's shareable viewing key
+    /// `spub`): `y` in little endian, top bit set when `x` is above `(p - 1) / 2`.
+    pub fn to_packed(&self) -> [u8; 32] {
+        let x = Fr::from_be_bytes_mod_order(&self.x);
+        let mut out = self.y;
+        out.reverse();
+        if x.into_bigint() > Fr::MODULUS_MINUS_ONE_DIV_TWO {
+            out[31] |= 0x80;
+        }
+        out
+    }
+
+    /// ZKNOX fork: inverse of [`Self::to_packed`] (circomlib `unpackPoint` on BabyJubJub,
+    /// `a = 168700`, `d = 168696`). `None` when the bytes are not a point of the curve.
+    pub fn from_packed(packed: &[u8; 32]) -> Option<Self> {
+        use ark_ff::{Field, One};
+        let mut le = *packed;
+        let negative = le[31] & 0x80 != 0;
+        le[31] &= 0x7f;
+        let y = Fr::from_le_bytes_mod_order(&le);
+        let mut canon = y.into_bigint().to_bytes_le();
+        canon.resize(32, 0);
+        if canon[..] != le[..] {
+            return None; // y >= p
+        }
+        let y2 = y.square();
+        let den = Fr::from(168700u64) - Fr::from(168696u64) * y2;
+        let x2 = (Fr::one() - y2) * den.inverse()?;
+        let mut x = x2.sqrt()?;
+        if x.into_bigint() > Fr::MODULUS_MINUS_ONE_DIV_TWO {
+            x = -x;
+        }
+        if negative {
+            x = -x;
+        }
+        let to32 = |f: Fr| {
+            let b = f.into_bigint().to_bytes_be();
+            let mut o = [0u8; 32];
+            o[32 - b.len()..].copy_from_slice(&b);
+            o
+        };
+        Some(Self { x: to32(x), y: to32(y) })
+    }
+
     pub fn x_hex(&self) -> String {
         hex::encode(self.x)
     }
@@ -385,6 +429,21 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+
+    /// circomlib `packPoint` / `unpackPoint` round trip, both signs of `x`.
+    #[test]
+    fn test_spending_public_key_packing() {
+        let mut negative = 0;
+        for i in 1u8..=40 {
+            let pk = SpendingKey::from_bytes([i; 32]).public_key();
+            let packed = pk.to_packed();
+            negative += usize::from(packed[31] & 0x80 != 0);
+            assert_eq!(SpendingPublicKey::from_packed(&packed), Some(pk), "key {i}");
+        }
+        assert!(negative > 0 && negative < 40, "both signs exercised");
+        // y >= p is refused
+        assert_eq!(SpendingPublicKey::from_packed(&[0x7f; 32]), None);
+    }
 
     // Test key and key derivation correctness against known values. Known values
     // were generated using the Railgun JS SDK.

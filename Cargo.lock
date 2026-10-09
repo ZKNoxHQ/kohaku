@@ -8174,7 +8174,7 @@ dependencies = [
 
 [[package]]
 name = "railgun-viewer"
-version = "0.2.20"
+version = "0.2.23"
 dependencies = [
  "alloy",
  "anyhow",
@@ -8198,7 +8198,7 @@ dependencies = [
 
 [[package]]
 name = "railgun-viewer-web"
-version = "0.1.4"
+version = "0.1.7"
 dependencies = [
  "alloy",
  "anyhow",
